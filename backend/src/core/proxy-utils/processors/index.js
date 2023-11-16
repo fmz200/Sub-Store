@@ -7,6 +7,8 @@ import lodash from 'lodash';
 import $ from '@/core/app';
 import { hex_md5 } from '@/vendor/md5';
 import { ProxyUtils } from '@/core/proxy-utils';
+import env from '@/utils/env';
+import { getFlowHeaders, parseFlowHeaders, flowTransfer } from '@/utils/flow';
 
 /**
  The rule "(name CONTAINS "🇨🇳") AND (port IN [80, 443])" can be expressed as follows:
@@ -294,7 +296,7 @@ function RegexDeleteOperator(regex) {
  1. This function name should be `operator`!
  2. Always declare variables before using them!
  */
-function ScriptOperator(script, targetPlatform, $arguments) {
+function ScriptOperator(script, targetPlatform, $arguments, source) {
     return {
         name: 'Script Operator',
         func: async (proxies) => {
@@ -305,7 +307,24 @@ function ScriptOperator(script, targetPlatform, $arguments) {
                     script,
                     $arguments,
                 );
-                output = operator(proxies, targetPlatform);
+                output = operator(proxies, targetPlatform, { source, ...env });
+            })();
+            return output;
+        },
+        nodeFunc: async (proxies) => {
+            let output = proxies;
+            await (async function () {
+                const operator = createDynamicFunction(
+                    'operator',
+                    `async function operator(proxies = []) {
+                        return proxies.map(($server = {}) => {
+                          ${script}
+                          return $server
+                        })
+                      }`,
+                    $arguments,
+                );
+                output = operator(proxies, targetPlatform, { source, ...env });
             })();
             return output;
         },
@@ -562,7 +581,7 @@ function TypeFilter(types) {
  1. This function name should be `filter`!
  2. Always declare variables before using them!
  */
-function ScriptFilter(script, targetPlatform, $arguments) {
+function ScriptFilter(script, targetPlatform, $arguments, source) {
     return {
         name: 'Script Filter',
         func: async (proxies) => {
@@ -573,7 +592,7 @@ function ScriptFilter(script, targetPlatform, $arguments) {
                     script,
                     $arguments,
                 );
-                output = filter(proxies, targetPlatform);
+                output = filter(proxies, targetPlatform, { source, ...env });
             })();
             return output;
         },
@@ -618,9 +637,33 @@ async function ApplyOperator(operator, objs) {
         const output_ = await operator.func(output);
         if (output_) output = output_;
     } catch (err) {
-        // print log and skip this operator
-        $.error(`Cannot apply operator ${operator.name}! Reason: ${err}`);
-        throw new Error(`脚本操作失败 ${err.message ?? err}`);
+        $.error(
+            `Cannot apply operator ${operator.name}(function operator)! Reason: ${err}`,
+        );
+        let funcErr = '';
+        let funcErrMsg = `${err.message ?? err}`;
+        if (funcErrMsg.includes('$server is not defined')) {
+            funcErr = '';
+        } else {
+            funcErr = `执行 function operator 失败 ${funcErrMsg}; `;
+        }
+        try {
+            const output_ = await operator.nodeFunc(output);
+            if (output_) output = output_;
+        } catch (err) {
+            $.error(
+                `Cannot apply operator ${operator.name}(node script)! Reason: ${err}`,
+            );
+            let nodeErr = '';
+            let nodeErrMsg = `${err.message ?? err}`;
+            if (funcErr && nodeErrMsg === funcErrMsg) {
+                nodeErr = '';
+                funcErr = `执行失败 ${funcErrMsg}`;
+            } else {
+                nodeErr = `执行节点快捷脚本 失败 ${nodeErr}`;
+            }
+            throw new Error(`脚本操作 ${funcErr}${nodeErr}`);
+        }
     }
     return output;
 }
@@ -667,6 +710,7 @@ function removeFlag(str) {
 }
 
 function createDynamicFunction(name, script, $arguments) {
+    const flowUtils = { getFlowHeaders, parseFlowHeaders, flowTransfer };
     if ($.env.isLoon) {
         return new Function(
             '$arguments',
@@ -677,6 +721,7 @@ function createDynamicFunction(name, script, $arguments) {
             '$notification',
             'ProxyUtils',
             'scriptResourceCache',
+            'flowUtils',
             `${script}\n return ${name}`,
         )(
             $arguments,
@@ -690,6 +735,7 @@ function createDynamicFunction(name, script, $arguments) {
             $notification,
             ProxyUtils,
             scriptResourceCache,
+            flowUtils,
         );
     } else {
         return new Function(
@@ -698,7 +744,9 @@ function createDynamicFunction(name, script, $arguments) {
             'lodash',
             'ProxyUtils',
             'scriptResourceCache',
+            'flowUtils',
+
             `${script}\n return ${name}`,
-        )($arguments, $, lodash, ProxyUtils, scriptResourceCache);
+        )($arguments, $, lodash, ProxyUtils, scriptResourceCache, flowUtils);
     }
 }

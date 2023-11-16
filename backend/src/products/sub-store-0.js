@@ -20,6 +20,8 @@ import registerArtifactRoutes from '@/restful/artifacts';
 import registerSettingRoutes from '@/restful/settings';
 import registerMiscRoutes from '@/restful/miscs';
 import registerSortRoutes from '@/restful/sort';
+import registerFileRoutes from '@/restful/file';
+import registerModuleRoutes from '@/restful/module';
 
 migrate();
 serve();
@@ -30,6 +32,8 @@ function serve() {
     // register routes
     registerCollectionRoutes($app);
     registerSubscriptionRoutes($app);
+    registerFileRoutes($app);
+    registerModuleRoutes($app);
     registerArtifactRoutes($app);
     registerSettingRoutes($app);
     registerSortRoutes($app);

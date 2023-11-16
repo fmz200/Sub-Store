@@ -240,7 +240,7 @@ function URI_VMess() {
                 params.add = server;
             }
             const proxy = {
-                name: params.ps ?? params.remark,
+                name: params.ps ?? params.remarks,
                 type: 'vmess',
                 server: params.add,
                 port: parseInt(getIfPresent(params.port), 10),
@@ -267,9 +267,19 @@ function URI_VMess() {
                 params.obfs === 'http'
             ) {
                 proxy.network = 'http';
+            } else if (['grpc'].includes(params.net)) {
+                proxy.network = 'grpc';
             }
             if (proxy.network) {
                 let transportHost = params.host ?? params.obfsParam;
+                try {
+                    const parsedObfs = JSON.parse(transportHost);
+                    const parsedHost = parsedObfs?.Host;
+                    if (parsedHost) {
+                        transportHost = parsedHost;
+                    }
+                    // eslint-disable-next-line no-empty
+                } catch (e) {}
                 let transportPath = params.path;
 
                 if (proxy.network === 'http') {
@@ -285,10 +295,17 @@ function URI_VMess() {
                     }
                 }
                 if (transportPath || transportHost) {
-                    proxy[`${proxy.network}-opts`] = {
-                        path: getIfNotBlank(transportPath),
-                        headers: { Host: getIfNotBlank(transportHost) },
-                    };
+                    if (['grpc'].includes(proxy.network)) {
+                        proxy[`${proxy.network}-opts`] = {
+                            'grpc-service-name': getIfNotBlank(transportPath),
+                            '_grpc-type': getIfNotBlank(params.type),
+                        };
+                    } else {
+                        proxy[`${proxy.network}-opts`] = {
+                            path: getIfNotBlank(transportPath),
+                            headers: { Host: getIfNotBlank(transportHost) },
+                        };
+                    }
                 } else {
                     delete proxy.network;
                 }
@@ -365,6 +382,10 @@ function URI_VLESS() {
             if (params.serviceName) {
                 opts[`${proxy.network}-service-name`] = params.serviceName;
             }
+            // https://github.com/XTLS/Xray-core/issues/91
+            if (['grpc'].includes(proxy.network)) {
+                opts['_grpc-type'] = params.mode || 'gun';
+            }
             if (Object.keys(opts).length > 0) {
                 proxy[`${proxy.network}-opts`] = opts;
             }
@@ -383,6 +404,56 @@ function URI_VLESS() {
     };
     return { name, test, parse };
 }
+function URI_Hysteria2() {
+    const name = 'URI Hysteria2 Parser';
+    const test = (line) => {
+        return /^hysteria2:\/\//.test(line);
+    };
+    const parse = (line) => {
+        line = line.split('hysteria2://')[1];
+        // eslint-disable-next-line no-unused-vars
+        let [__, password, server, ___, port, addons, name] =
+            /^(.*?)@(.*?)(:(\d+))?\/?\?(.*?)(?:#(.*?))$/.exec(line);
+        port = parseInt(`${port}`, 10);
+        if (isNaN(port)) {
+            port = 443;
+        }
+        password = decodeURIComponent(password);
+        name = decodeURIComponent(name) ?? `Hysteria2 ${server}:${port}`;
+
+        const proxy = {
+            type: 'hysteria2',
+            name,
+            server,
+            port,
+            password,
+        };
+
+        const params = {};
+        for (const addon of addons.split('&')) {
+            const [key, valueRaw] = addon.split('=');
+            let value = valueRaw;
+            value = decodeURIComponent(valueRaw);
+            params[key] = value;
+        }
+
+        proxy.sni = params.sni;
+        if (!proxy.sni && params.peer) {
+            proxy.sni = params.peer;
+        }
+        if (params.obfs && params.obfs !== 'none') {
+            proxy.obfs = params.obfs;
+        }
+
+        proxy['obfs-password'] = params['obfs-password'];
+        proxy['skip-cert-verify'] = /(TRUE)|1/i.test(params.insecure);
+        proxy.tfo = /(TRUE)|1/i.test(params.fastopen);
+        proxy['tls-fingerprint'] = params.pinSHA256;
+
+        return proxy;
+    };
+    return { name, test, parse };
+}
 
 // Trojan URI format
 function URI_Trojan() {
@@ -392,8 +463,16 @@ function URI_Trojan() {
     };
 
     const parse = (line) => {
+        let [newLine, name] = line.split(/#(.+)/, 2);
         const parser = getTrojanURIParser();
-        const proxy = parser.parse(line);
+        const proxy = parser.parse(newLine);
+        if (isNotBlank(name)) {
+            try {
+                proxy.name = decodeURIComponent(name);
+            } catch (e) {
+                console.log(e);
+            }
+        }
         return proxy;
     };
     return { name, test, parse };
@@ -416,13 +495,14 @@ function Clash_All() {
                 'ss',
                 'ssr',
                 'vmess',
-                'socks',
+                'socks5',
                 'http',
                 'snell',
                 'trojan',
                 'tuic',
                 'vless',
                 'hysteria',
+                'hysteria2',
                 'wireguard',
             ].includes(proxy.type)
         ) {
@@ -445,6 +525,10 @@ function Clash_All() {
                         : httpHost;
                 }
             }
+        }
+
+        if (proxy['benchmark-url']) {
+            proxy['test-url'] = proxy['benchmark-url'];
         }
 
         return proxy;
@@ -565,6 +649,15 @@ function Loon_Trojan() {
     const name = 'Loon Trojan Parser';
     const test = (line) => {
         return /^.*=\s*trojan/i.test(line.split(',')[0]);
+    };
+
+    const parse = (line) => getLoonParser().parse(line);
+    return { name, test, parse };
+}
+function Loon_Hysteria2() {
+    const name = 'Loon Hysteria2 Parser';
+    const test = (line) => {
+        return /^.*=\s*Hysteria2/i.test(line.split(',')[0]);
     };
 
     const parse = (line) => getLoonParser().parse(line);
@@ -762,11 +855,21 @@ function Surge_WireGuard() {
     return { name, test, parse };
 }
 
+function Surge_Hysteria2() {
+    const name = 'Surge Hysteria2 Parser';
+    const test = (line) => {
+        return /^.*=\s*hysteria2/.test(line.split(',')[0]);
+    };
+    const parse = (line) => getSurgeParser().parse(line);
+    return { name, test, parse };
+}
+
 export default [
     URI_SS(),
     URI_SSR(),
     URI_VMess(),
     URI_VLESS(),
+    URI_Hysteria2(),
     URI_Trojan(),
     Clash_All(),
     Surge_SS(),
@@ -776,11 +879,13 @@ export default [
     Surge_Snell(),
     Surge_Tuic(),
     Surge_WireGuard(),
+    Surge_Hysteria2(),
     Surge_Socks5(),
     Loon_SS(),
     Loon_SSR(),
     Loon_VMess(),
     Loon_Vless(),
+    Loon_Hysteria2(),
     Loon_Trojan(),
     Loon_Http(),
     Loon_WireGuard(),

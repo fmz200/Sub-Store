@@ -1,7 +1,6 @@
 import $ from '@/core/app';
 import { ENV } from '@/vendor/open-api';
 import { failed, success } from '@/restful/response';
-import { version as substoreVersion } from '../../package.json';
 import { updateArtifactStore, updateGitHubAvatar } from '@/restful/settings';
 import resourceCache from '@/utils/resource-cache';
 import {
@@ -12,6 +11,7 @@ import {
 import { InternalServerError, RequestInvalidError } from '@/restful/errors';
 import Gist from '@/utils/gist';
 import migrate from '@/utils/migration';
+import env from '@/utils/env';
 
 export default function register($app) {
     // utils
@@ -49,19 +49,7 @@ export default function register($app) {
 }
 
 function getEnv(req, res) {
-    const { isNode, isQX, isLoon, isSurge, isStash, isShadowRocket } = ENV();
-    let backend = 'Node';
-    if (isNode) backend = 'Node';
-    if (isQX) backend = 'QX';
-    if (isLoon) backend = 'Loon';
-    if (isSurge) backend = 'Surge';
-    if (isStash) backend = 'Stash';
-    if (isShadowRocket) backend = 'ShadowRocket';
-
-    success(res, {
-        backend,
-        version: substoreVersion,
-    });
+    success(res, env);
 }
 
 async function refresh(_, res) {
@@ -118,6 +106,23 @@ async function gistBackup(req, res) {
                 case 'download':
                     $.info(`还原备份中...`);
                     content = await gist.download(GIST_BACKUP_FILE_NAME);
+                    try {
+                        if (
+                            Object.keys(JSON.parse(content).settings).length ===
+                            0
+                        ) {
+                            throw new Error(
+                                '备份文件应该至少包含 settings 字段',
+                            );
+                        }
+                    } catch (err) {
+                        $.error(
+                            `Gist 备份文件校验失败, 无法还原\nReason: ${
+                                err.message ?? err
+                            }`,
+                        );
+                        throw new Error('Gist 备份文件校验失败, 无法还原');
+                    }
                     // restore settings
                     $.write(content, '#sub-store');
                     if ($.env.isNode) {

@@ -63,28 +63,44 @@ function parse(raw) {
     return proxies;
 }
 
-async function process(proxies, operators = [], targetPlatform) {
+async function process(proxies, operators = [], targetPlatform, source) {
     for (const item of operators) {
         // process script
         let script;
-        const $arguments = {};
+        let $arguments = {};
         if (item.type.indexOf('Script') !== -1) {
             const { mode, content } = item.args;
             if (mode === 'link') {
-                const url = content;
+                let noCache;
+                let url = content;
+                if (url.endsWith('#noCache')) {
+                    url = url.replace(/#noCache$/, '');
+                    noCache = true;
+                }
                 // extract link arguments
                 const rawArgs = url.split('#');
                 if (rawArgs.length > 1) {
-                    for (const pair of rawArgs[1].split('&')) {
-                        const key = pair.split('=')[0];
-                        const value = pair.split('=')[1] || true;
-                        $arguments[key] = value;
+                    try {
+                        // 支持 `#${encodeURIComponent(JSON.stringify({arg1: "1"}))}`
+                        $arguments = JSON.parse(decodeURIComponent(rawArgs[1]));
+                    } catch (e) {
+                        for (const pair of rawArgs[1].split('&')) {
+                            const key = pair.split('=')[0];
+                            const value = pair.split('=')[1];
+                            // 部分兼容之前的逻辑 const value = pair.split('=')[1] || true;
+                            $arguments[key] =
+                                value == null || value === ''
+                                    ? true
+                                    : decodeURIComponent(value);
+                        }
                     }
                 }
 
                 // if this is a remote script, download it
                 try {
-                    script = await download(url.split('#')[0]);
+                    script = await download(
+                        `${url.split('#')[0]}${noCache ? '#noCache' : ''}`,
+                    );
                     // $.info(`Script loaded: >>>\n ${script}`);
                 } catch (err) {
                     $.error(
@@ -113,6 +129,7 @@ async function process(proxies, operators = [], targetPlatform) {
                 script,
                 targetPlatform,
                 $arguments,
+                source,
             );
         } else {
             processor = PROXY_PROCESSORS[item.type](item.args || {});
@@ -173,6 +190,9 @@ export const ProxyUtils = {
     parse,
     process,
     produce,
+    isIPv4,
+    isIPv6,
+    isIP,
 };
 
 function tryParse(parser, line) {
@@ -199,8 +219,16 @@ function lastParse(proxy) {
             delete proxy.network;
         }
     }
-    if (['trojan', 'tuic', 'hysteria'].includes(proxy.type)) {
+    if (['trojan', 'tuic', 'hysteria', 'hysteria2'].includes(proxy.type)) {
         proxy.tls = true;
+    }
+    if (proxy.network) {
+        let transportHost = proxy[`${proxy.network}-opts`]?.headers?.Host;
+        let transporthost = proxy[`${proxy.network}-opts`]?.headers?.host;
+        if (transporthost && !transportHost) {
+            proxy[`${proxy.network}-opts`].headers.Host = transporthost;
+            delete proxy[`${proxy.network}-opts`].headers.host;
+        }
     }
     if (proxy.tls && !proxy.sni) {
         if (proxy.network) {

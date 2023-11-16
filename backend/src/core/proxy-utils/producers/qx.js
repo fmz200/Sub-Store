@@ -63,6 +63,19 @@ function shadowsocks(proxy) {
     }
 
     if (needTls(proxy)) {
+        appendIfPresent(
+            `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+            'tls-pubkey-sha256',
+        );
+        appendIfPresent(`,tls-alpn=${proxy['tls-alpn']}`, 'tls-alpn');
+        appendIfPresent(
+            `,tls-no-session-ticket=${proxy['tls-no-session-ticket']}`,
+            'tls-no-session-ticket',
+        );
+        appendIfPresent(
+            `,tls-no-session-reuse=${proxy['tls-no-session-reuse']}`,
+            'tls-no-session-reuse',
+        );
         // tls fingerprint
         appendIfPresent(
             `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
@@ -82,6 +95,12 @@ function shadowsocks(proxy) {
 
     // udp
     appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
+
+    // server_check_url
+    result.appendIfPresent(
+        `,server_check_url=${proxy['test-url']}`,
+        'test-url',
+    );
 
     // tag
     append(`,tag=${proxy.name}`);
@@ -114,6 +133,12 @@ function shadowsocksr(proxy) {
 
     // udp
     appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
+
+    // server_check_url
+    result.appendIfPresent(
+        `,server_check_url=${proxy['test-url']}`,
+        'test-url',
+    );
 
     // tag
     append(`,tag=${proxy.name}`);
@@ -153,6 +178,19 @@ function trojan(proxy) {
     }
 
     if (needTls(proxy)) {
+        appendIfPresent(
+            `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+            'tls-pubkey-sha256',
+        );
+        appendIfPresent(`,tls-alpn=${proxy['tls-alpn']}`, 'tls-alpn');
+        appendIfPresent(
+            `,tls-no-session-ticket=${proxy['tls-no-session-ticket']}`,
+            'tls-no-session-ticket',
+        );
+        appendIfPresent(
+            `,tls-no-session-reuse=${proxy['tls-no-session-reuse']}`,
+            'tls-no-session-reuse',
+        );
         // tls fingerprint
         appendIfPresent(
             `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
@@ -172,6 +210,12 @@ function trojan(proxy) {
 
     // udp
     appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
+
+    // server_check_url
+    result.appendIfPresent(
+        `,server_check_url=${proxy['test-url']}`,
+        'test-url',
+    );
 
     // tag
     append(`,tag=${proxy.name}`);
@@ -230,6 +274,19 @@ function vmess(proxy) {
     }
 
     if (needTls(proxy)) {
+        appendIfPresent(
+            `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+            'tls-pubkey-sha256',
+        );
+        appendIfPresent(`,tls-alpn=${proxy['tls-alpn']}`, 'tls-alpn');
+        appendIfPresent(
+            `,tls-no-session-ticket=${proxy['tls-no-session-ticket']}`,
+            'tls-no-session-ticket',
+        );
+        appendIfPresent(
+            `,tls-no-session-reuse=${proxy['tls-no-session-reuse']}`,
+            'tls-no-session-reuse',
+        );
         // tls fingerprint
         appendIfPresent(
             `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
@@ -257,6 +314,12 @@ function vmess(proxy) {
     // udp
     appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
 
+    // server_check_url
+    result.appendIfPresent(
+        `,server_check_url=${proxy['test-url']}`,
+        'test-url',
+    );
+
     // tag
     append(`,tag=${proxy.name}`);
 
@@ -279,6 +342,19 @@ function http(proxy) {
     appendIfPresent(`,over-tls=${proxy.tls}`, 'tls');
 
     if (needTls(proxy)) {
+        appendIfPresent(
+            `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+            'tls-pubkey-sha256',
+        );
+        appendIfPresent(`,tls-alpn=${proxy['tls-alpn']}`, 'tls-alpn');
+        appendIfPresent(
+            `,tls-no-session-ticket=${proxy['tls-no-session-ticket']}`,
+            'tls-no-session-ticket',
+        );
+        appendIfPresent(
+            `,tls-no-session-reuse=${proxy['tls-no-session-reuse']}`,
+            'tls-no-session-reuse',
+        );
         // tls fingerprint
         appendIfPresent(
             `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
@@ -298,6 +374,12 @@ function http(proxy) {
 
     // udp
     appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
+
+    // server_check_url
+    result.appendIfPresent(
+        `,server_check_url=${proxy['test-url']}`,
+        'test-url',
+    );
 
     // tag
     append(`,tag=${proxy.name}`);
@@ -321,6 +403,19 @@ function socks5(proxy) {
     appendIfPresent(`,over-tls=${proxy.tls}`, 'tls');
 
     if (needTls(proxy)) {
+        appendIfPresent(
+            `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+            'tls-pubkey-sha256',
+        );
+        appendIfPresent(`,tls-alpn=${proxy['tls-alpn']}`, 'tls-alpn');
+        appendIfPresent(
+            `,tls-no-session-ticket=${proxy['tls-no-session-ticket']}`,
+            'tls-no-session-ticket',
+        );
+        appendIfPresent(
+            `,tls-no-session-reuse=${proxy['tls-no-session-reuse']}`,
+            'tls-no-session-reuse',
+        );
         // tls fingerprint
         appendIfPresent(
             `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
@@ -340,6 +435,12 @@ function socks5(proxy) {
 
     // udp
     appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
+
+    // server_check_url
+    result.appendIfPresent(
+        `,server_check_url=${proxy['test-url']}`,
+        'test-url',
+    );
 
     // tag
     append(`,tag=${proxy.name}`);

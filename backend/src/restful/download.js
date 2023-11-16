@@ -20,6 +20,19 @@ async function downloadSubscription(req, res) {
         req.query.target || getPlatformFromHeaders(req.headers) || 'JSON';
 
     $.info(`正在下载订阅：${name}`);
+    let { url, ua, content } = req.query;
+    if (url) {
+        url = decodeURIComponent(url);
+        $.info(`指定 url: ${url}`);
+    }
+    if (ua) {
+        ua = decodeURIComponent(ua);
+        $.info(`指定 ua: ${ua}`);
+    }
+    if (content) {
+        content = decodeURIComponent(content);
+        $.info(`指定 content: ${content}`);
+    }
 
     const allSubs = $.read(SUBS_KEY);
     const sub = findByName(allSubs, name);
@@ -29,12 +42,15 @@ async function downloadSubscription(req, res) {
                 type: 'subscription',
                 name,
                 platform,
+                url,
+                ua,
+                content,
             });
 
-            if (sub.source !== 'local') {
+            if (sub.source !== 'local' || url) {
                 try {
                     // forward flow headers
-                    const flowInfo = await getFlowHeaders(sub.url);
+                    const flowInfo = await getFlowHeaders(url || sub.url);
                     if (flowInfo) {
                         res.set('subscription-userinfo', flowInfo);
                     }

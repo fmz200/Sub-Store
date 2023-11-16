@@ -22,25 +22,33 @@ export default function register($app) {
     $app.get('/api/sync/artifact/:name', syncArtifact);
 }
 
-async function produceArtifact({ type, name, platform }) {
+async function produceArtifact({ type, name, platform, url, ua, content }) {
     platform = platform || 'JSON';
 
     if (type === 'subscription') {
         const allSubs = $.read(SUBS_KEY);
         const sub = findByName(allSubs, name);
         let raw;
-        if (sub.source === 'local') {
+        if (url) {
+            raw = await download(url, ua);
+        } else if (content) {
+            raw = content;
+        } else if (sub.source === 'local') {
             raw = sub.content;
         } else {
             raw = await download(sub.url, sub.ua);
         }
         // parse proxies
         let proxies = ProxyUtils.parse(raw);
+        proxies.forEach((proxy) => {
+            proxy.subName = sub.name;
+        });
         // apply processors
         proxies = await ProxyUtils.process(
             proxies,
             sub.process || [],
             platform,
+            { [sub.name]: sub },
         );
         if (proxies.length === 0) {
             throw new Error(`订阅 ${name} 中不含有效节点`);
@@ -51,7 +59,7 @@ async function produceArtifact({ type, name, platform }) {
             if (exist[proxy.name]) {
                 $.notify(
                     '🌍 Sub-Store',
-                    '⚠️ 订阅包含重复节点！',
+                    `⚠️ 订阅 ${name} 包含重复节点 ${proxy.name}！`,
                     '请仔细检测配置！',
                     {
                         'media-url':
@@ -86,11 +94,18 @@ async function produceArtifact({ type, name, platform }) {
                     }
                     // parse proxies
                     let currentProxies = ProxyUtils.parse(raw);
+
+                    currentProxies.forEach((proxy) => {
+                        proxy.subName = sub.name;
+                        proxy.collectionName = collection.name;
+                    });
+
                     // apply processors
                     currentProxies = await ProxyUtils.process(
                         currentProxies,
                         sub.process || [],
                         platform,
+                        { [sub.name]: sub, _collection: collection },
                     );
                     results[name] = currentProxies;
                     processed++;
@@ -127,11 +142,16 @@ async function produceArtifact({ type, name, platform }) {
             subnames.map((name) => results[name] || []),
         );
 
+        proxies.forEach((proxy) => {
+            proxy.collectionName = collection.name;
+        });
+
         // apply own processors
         proxies = await ProxyUtils.process(
             proxies,
             collection.process || [],
             platform,
+            { _collection: collection },
         );
         if (proxies.length === 0) {
             throw new Error(`组合订阅 ${name} 中不含有效节点`);
@@ -142,7 +162,7 @@ async function produceArtifact({ type, name, platform }) {
             if (exist[proxy.name]) {
                 $.notify(
                     '🌍 Sub-Store',
-                    '⚠️ 订阅包含重复节点！',
+                    `⚠️ 组合订阅 ${name} 包含重复节点 ${proxy.name}！`,
                     '请仔细检测配置！',
                     {
                         'media-url':

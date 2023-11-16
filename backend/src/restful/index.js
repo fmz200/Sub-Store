@@ -4,6 +4,8 @@ import $ from '@/core/app';
 import registerSubscriptionRoutes from './subscriptions';
 import registerCollectionRoutes from './collections';
 import registerArtifactRoutes from './artifacts';
+import registerFileRoutes from './file';
+import registerModuleRoutes from './module';
 import registerSyncRoutes from './sync';
 import registerDownloadRoutes from './download';
 import registerSettingRoutes from './settings';
@@ -23,6 +25,8 @@ export default function serve() {
     registerSortingRoutes($app);
     registerSettingRoutes($app);
     registerArtifactRoutes($app);
+    registerFileRoutes($app);
+    registerModuleRoutes($app);
     registerSyncRoutes($app);
     registerNodeInfoRoutes($app);
     registerMiscRoutes($app);

@@ -3,6 +3,9 @@ import { isPresent } from '@/core/proxy-utils/producers/utils';
 export default function Clash_Producer() {
     const type = 'ALL';
     const produce = (proxies) => {
+        // VLESS XTLS is not supported by Clash
+        // https://github.com/MetaCubeX/Clash.Meta/blob/Alpha/docs/config.yaml#L532
+        // github.com/Dreamacro/clash/pull/2891/files
         // filter unsupported proxies
         proxies = proxies.filter((proxy) => {
             if (
@@ -10,17 +13,17 @@ export default function Clash_Producer() {
                     'ss',
                     'ssr',
                     'vmess',
-                    'socks',
+                    'vless',
+                    'socks5',
                     'http',
                     'snell',
                     'trojan',
                     'wireguard',
-                ].includes(proxy.type)
-            ) {
-                return false;
-            } else if (
-                proxy.type === 'snell' &&
-                String(proxy.version) === '4'
+                ].includes(proxy.type) ||
+                (proxy.type === 'snell' && String(proxy.version) === '4') ||
+                (proxy.type === 'vless' &&
+                    (typeof proxy.flow !== 'undefined' ||
+                        proxy['reality-opts']))
             ) {
                 return false;
             }
@@ -87,10 +90,26 @@ export default function Clash_Producer() {
                             proxy['http-opts'].headers.Host = [httpHost];
                         }
                     }
-                    if (['trojan', 'tuic', 'hysteria'].includes(proxy.type)) {
+                    if (
+                        ['trojan', 'tuic', 'hysteria', 'hysteria2'].includes(
+                            proxy.type,
+                        )
+                    ) {
                         delete proxy.tls;
                     }
+
+                    if (proxy['tls-fingerprint']) {
+                        proxy.fingerprint = proxy['tls-fingerprint'];
+                    }
                     delete proxy['tls-fingerprint'];
+                    delete proxy.subName;
+                    delete proxy.collectionName;
+                    if (
+                        ['grpc'].includes(proxy.network) &&
+                        proxy[`${proxy.network}-opts`]
+                    ) {
+                        delete proxy[`${proxy.network}-opts`]['_grpc-type'];
+                    }
                     return '  - ' + JSON.stringify(proxy) + '\n';
                 })
                 .join('')

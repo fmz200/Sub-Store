@@ -63,6 +63,13 @@ export default function ShadowRocket_Producer() {
                             proxy.version = 5;
                         }
                     } else if (proxy.type === 'hysteria') {
+                        // auth_str 将会在未来某个时候删除 但是有的机场不规范
+                        if (
+                            isPresent(proxy, 'auth_str') &&
+                            !isPresent(proxy, 'auth-str')
+                        ) {
+                            proxy['auth-str'] = proxy['auth_str'];
+                        }
                         if (isPresent(proxy, 'alpn')) {
                             proxy.alpn = Array.isArray(proxy.alpn)
                                 ? proxy.alpn
@@ -108,11 +115,26 @@ export default function ShadowRocket_Producer() {
                         }
                     }
 
-                    if (['trojan', 'tuic', 'hysteria'].includes(proxy.type)) {
+                    if (
+                        ['trojan', 'tuic', 'hysteria', 'hysteria2'].includes(
+                            proxy.type,
+                        )
+                    ) {
                         delete proxy.tls;
                     }
 
+                    if (proxy['tls-fingerprint']) {
+                        proxy.fingerprint = proxy['tls-fingerprint'];
+                    }
                     delete proxy['tls-fingerprint'];
+                    delete proxy.subName;
+                    delete proxy.collectionName;
+                    if (
+                        ['grpc'].includes(proxy.network) &&
+                        proxy[`${proxy.network}-opts`]
+                    ) {
+                        delete proxy[`${proxy.network}-opts`]['_grpc-type'];
+                    }
                     return '  - ' + JSON.stringify(proxy) + '\n';
                 })
                 .join('')

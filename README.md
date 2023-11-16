@@ -30,13 +30,14 @@ Core functionalities:
 - [x] SSR URI
 - [x] SSD URI
 - [x] V2RayN URI
+- [x] Hysteria2 URI
 - [x] QX (SS, SSR, VMess, Trojan, HTTP)
-- [x] Loon (SS, SSR, VMess, Trojan, HTTP, WireGuard, VLESS)
-- [x] Surge (SS, VMess, Trojan, HTTP, TUIC, Snell, SSR(external, only for macOS))
-- [x] ShadowRocket (SS, SSR, VMess, Trojan, HTTP, Snell, VLESS, WireGuard, Hysteria)
-- [x] Clash.Meta (SS, SSR, VMess, Trojan, HTTP, Snell, VLESS, WireGuard, Hysteria)
+- [x] Loon (SS, SSR, VMess, Trojan, HTTP, WireGuard, VLESS, Hysteria2)
+- [x] Surge (SS, VMess, Trojan, HTTP, TUIC, Snell, Hysteria2, SSR(external, only for macOS), WireGuard(Surge to Surge))
+- [x] ShadowRocket (SS, SSR, VMess, Trojan, HTTP, Snell, VLESS, Hysteria2)
+- [x] Clash.Meta (SS, SSR, VMess, Trojan, HTTP, Snell, VLESS, WireGuard, Hysteria, Hysteria2)
 - [x] Stash (SS, SSR, VMess, Trojan, HTTP, Snell, VLESS, WireGuard, Hysteria)
-- [x] Clash (SS, SSR, VMess, Trojan, HTTP, Snell)
+- [x] Clash (SS, SSR, VMess, Trojan, HTTP, Snell, VLESS, WireGuard)
 
 ### Supported Target Platforms
 
@@ -75,23 +76,19 @@ Core functionalities:
 
 ### Development
 
-Go to `backend` and `web` directories, install node dependencies:
+Install `pnpm`
+
+Go to `backend` directories, install node dependencies:
 
 ```
-npm install
+pnpm install
 ```
 
 1. In `backend`, run the backend server on http://localhost:3000
 
 ```
-npm run serve
+pnpm start
 ```
-
-2. In`web`, start the vue-cli server
-   
-   ```
-   npm start
-   ```
 
 ## LICENSE
 
