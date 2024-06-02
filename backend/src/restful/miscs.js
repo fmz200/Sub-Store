@@ -1,8 +1,10 @@
 import $ from '@/core/app';
 import { ENV } from '@/vendor/open-api';
 import { failed, success } from '@/restful/response';
-import { updateArtifactStore, updateGitHubAvatar } from '@/restful/settings';
+import { updateArtifactStore, updateAvatar } from '@/restful/settings';
 import resourceCache from '@/utils/resource-cache';
+import scriptResourceCache from '@/utils/script-resource-cache';
+import headersResourceCache from '@/utils/headers-resource-cache';
 import {
     GIST_BACKUP_FILE_NAME,
     GIST_BACKUP_KEY,
@@ -22,12 +24,26 @@ export default function register($app) {
     // Storage management
     $app.route('/api/storage')
         .get((req, res) => {
-            res.json($.read('#sub-store'));
+            res.set('content-type', 'application/json')
+                .set(
+                    'content-disposition',
+                    'attachment; filename="sub-store.json"',
+                )
+                .send(
+                    $.env.isNode
+                        ? JSON.stringify($.cache)
+                        : $.read('#sub-store'),
+                );
         })
         .post((req, res) => {
-            const data = req.body;
-            $.write(JSON.stringify(data), '#sub-store');
-            res.end();
+            const { content } = req.body;
+            $.write(content, '#sub-store');
+            if ($.env.isNode) {
+                $.cache = JSON.parse(content);
+                $.persistCache();
+            }
+            migrate();
+            success(res);
         });
 
     // Redirect sub.store to vercel webpage
@@ -54,18 +70,20 @@ function getEnv(req, res) {
 
 async function refresh(_, res) {
     // 1. get GitHub avatar and artifact store
-    await updateGitHubAvatar();
+    await updateAvatar();
     await updateArtifactStore();
 
     // 2. clear resource cache
     resourceCache.revokeAll();
+    scriptResourceCache.revokeAll();
+    headersResourceCache.revokeAll();
     success(res);
 }
 
 async function gistBackup(req, res) {
     const { action } = req.query;
     // read token
-    const { gistToken } = $.read(SETTINGS_KEY);
+    const { gistToken, syncPlatform } = $.read(SETTINGS_KEY);
     if (!gistToken) {
         failed(
             res,
@@ -78,6 +96,7 @@ async function gistBackup(req, res) {
         const gist = new Gist({
             token: gistToken,
             key: GIST_BACKUP_KEY,
+            syncPlatform,
         });
         try {
             let content;
@@ -138,11 +157,14 @@ async function gistBackup(req, res) {
             }
             success(res);
         } catch (err) {
+            $.error(
+                `Failed to ${action} gist data.\nReason: ${err.message ?? err}`,
+            );
             failed(
                 res,
                 new InternalServerError(
                     'BACKUP_FAILED',
-                    `Failed to ${action} data to gist!`,
+                    `Failed to ${action} gist data!`,
                     `Reason: ${err.message ?? err}`,
                 ),
             );

@@ -7,8 +7,17 @@ import lodash from 'lodash';
 import $ from '@/core/app';
 import { hex_md5 } from '@/vendor/md5';
 import { ProxyUtils } from '@/core/proxy-utils';
+import { produceArtifact } from '@/restful/sync';
+
 import env from '@/utils/env';
-import { getFlowHeaders, parseFlowHeaders, flowTransfer } from '@/utils/flow';
+import {
+    getFlowField,
+    getFlowHeaders,
+    parseFlowHeaders,
+    validCheck,
+    flowTransfer,
+    getRmainingDays,
+} from '@/utils/flow';
 
 /**
  The rule "(name CONTAINS "🇨🇳") AND (port IN [80, 443])" can be expressed as follows:
@@ -79,12 +88,15 @@ function QuickSettingOperator(args) {
             if (get(args.useless)) {
                 const filter = UselessFilter();
                 const selected = filter.func(proxies);
-                proxies.filter((_, i) => selected[i]);
+                proxies = proxies.filter(
+                    (p, i) => selected[i] && p.port > 0 && p.port <= 65535,
+                );
             }
 
             return proxies.map((proxy) => {
                 proxy.udp = get(args.udp, proxy.udp);
                 proxy.tfo = get(args.tfo, proxy.tfo);
+                proxy['fast-open'] = get(args.tfo, proxy['fast-open']);
                 proxy['skip-cert-verify'] = get(
                     args.scert,
                     proxy['skip-cert-verify'],
@@ -110,7 +122,7 @@ function QuickSettingOperator(args) {
 }
 
 // add or remove flag for proxies
-function FlagOperator({ mode }) {
+function FlagOperator({ mode, tw }) {
     return {
         name: 'Flag Operator',
         func: (proxies) => {
@@ -124,7 +136,13 @@ function FlagOperator({ mode }) {
                     // remove old flag
                     proxy.name = removeFlag(proxy.name);
                     proxy.name = newFlag + ' ' + proxy.name;
-                    proxy.name = proxy.name.replace(/🇹🇼/g, '🇨🇳');
+                    if (tw == 'ws') {
+                        proxy.name = proxy.name.replace(/🇹🇼/g, '🇼🇸');
+                    } else if (tw == 'tw') {
+                        // 不变
+                    } else {
+                        proxy.name = proxy.name.replace(/🇹🇼/g, '🇨🇳');
+                    }
                 }
                 return proxy;
             });
@@ -316,11 +334,20 @@ function ScriptOperator(script, targetPlatform, $arguments, source) {
             await (async function () {
                 const operator = createDynamicFunction(
                     'operator',
-                    `async function operator(proxies = []) {
-                        return proxies.map(($server = {}) => {
-                          ${script}
-                          return $server
-                        })
+                    `async function operator(input = []) {
+                        if (input && (input.$files || input.$content)) {
+                            let { $content, $files } = input
+                            ${script}
+                            return { $content, $files }
+                        } else {
+                            let proxies = input
+                            let list = []
+                            for await (let $server of proxies) {
+                                ${script}
+                                list.push($server)
+                            }
+                            return list
+                        }
                       }`,
                     $arguments,
                 );
@@ -331,15 +358,45 @@ function ScriptOperator(script, targetPlatform, $arguments, source) {
     };
 }
 
+function parseIP4P(IP4P) {
+    let server;
+    let port;
+    try {
+        if (!/^2001::[^:]+:[^:]+:[^:]+$/.test(IP4P)) {
+            throw new Error(`Invalid IP4P: ${IP4P}`);
+        }
+        let array = IP4P.split(':');
+
+        port = parseInt(array[2], 16);
+        let ipab = parseInt(array[3], 16);
+        let ipcd = parseInt(array[4], 16);
+        let ipa = ipab >> 8;
+        let ipb = ipab & 0xff;
+        let ipc = ipcd >> 8;
+        let ipd = ipcd & 0xff;
+        server = `${ipa}.${ipb}.${ipc}.${ipd}`;
+        if (port <= 0 || port > 65535) {
+            throw new Error(`Invalid port number: ${port}`);
+        }
+        if (!isIPv4(server)) {
+            throw new Error(`Invalid IP address: ${server}`);
+        }
+    } catch (e) {
+        // throw new Error(`IP4P 解析失败: ${e}`);
+        $.error(`IP4P 解析失败: ${e}`);
+    }
+    return { server, port };
+}
+
 const DOMAIN_RESOLVERS = {
-    Google: async function (domain) {
-        const id = hex_md5(`GOOGLE:${domain}`);
+    Google: async function (domain, type, noCache) {
+        const id = hex_md5(`GOOGLE:${domain}:${type}`);
         const cached = resourceCache.get(id);
-        if (cached) return cached;
+        if (!noCache && cached) return cached;
         const resp = await $.http.get({
             url: `https://8.8.4.4/resolve?name=${encodeURIComponent(
                 domain,
-            )}&type=A`,
+            )}&type=${type === 'IPv6' ? 'AAAA' : 'A'}`,
             headers: {
                 accept: 'application/dns-json',
             },
@@ -356,10 +413,13 @@ const DOMAIN_RESOLVERS = {
         resourceCache.set(id, result);
         return result;
     },
-    'IP-API': async function (domain) {
+    'IP-API': async function (domain, type, noCache) {
+        if (['IPv6'].includes(type)) {
+            throw new Error(`域名解析服务提供方 IP-API 不支持 ${type}`);
+        }
         const id = hex_md5(`IP-API:${domain}`);
         const cached = resourceCache.get(id);
-        if (cached) return cached;
+        if (!noCache && cached) return cached;
         const resp = await $.http.get({
             url: `http://ip-api.com/json/${encodeURIComponent(
                 domain,
@@ -373,14 +433,14 @@ const DOMAIN_RESOLVERS = {
         resourceCache.set(id, result);
         return result;
     },
-    Cloudflare: async function (domain) {
-        const id = hex_md5(`CLOUDFLARE:${domain}`);
+    Cloudflare: async function (domain, type, noCache) {
+        const id = hex_md5(`CLOUDFLARE:${domain}:${type}`);
         const cached = resourceCache.get(id);
-        if (cached) return cached;
+        if (!noCache && cached) return cached;
         const resp = await $.http.get({
             url: `https://1.0.0.1/dns-query?name=${encodeURIComponent(
                 domain,
-            )}&type=A`,
+            )}&type=${type === 'IPv6' ? 'AAAA' : 'A'}`,
             headers: {
                 accept: 'application/dns-json',
             },
@@ -397,14 +457,14 @@ const DOMAIN_RESOLVERS = {
         resourceCache.set(id, result);
         return result;
     },
-    Ali: async function (domain) {
-        const id = hex_md5(`ALI:${domain}`);
+    Ali: async function (domain, type, noCache) {
+        const id = hex_md5(`ALI:${domain}:${type}`);
         const cached = resourceCache.get(id);
-        if (cached) return cached;
+        if (!noCache && cached) return cached;
         const resp = await $.http.get({
-            url: `http://223.6.6.6/resolve?name=${encodeURIComponent(
+            url: `http://223.6.6.6/resolve?edns_client_subnet=223.6.6.6/24&name=${encodeURIComponent(
                 domain,
-            )}&type=A&short=1`,
+            )}&type=${type === 'IPv6' ? 'AAAA' : 'A'}&short=1`,
             headers: {
                 accept: 'application/dns-json',
             },
@@ -417,20 +477,20 @@ const DOMAIN_RESOLVERS = {
         resourceCache.set(id, result);
         return result;
     },
-    Tencent: async function (domain) {
-        const id = hex_md5(`ALI:${domain}`);
+    Tencent: async function (domain, type, noCache) {
+        const id = hex_md5(`ALI:${domain}:${type}`);
         const cached = resourceCache.get(id);
-        if (cached) return cached;
+        if (!noCache && cached) return cached;
         const resp = await $.http.get({
-            url: `http://119.28.28.28/d?type=A&dn=${encodeURIComponent(
-                domain,
-            )}`,
+            url: `http://119.28.28.28/d?ip=119.28.28.28&type=${
+                type === 'IPv6' ? 'AAAA' : 'A'
+            }&dn=${encodeURIComponent(domain)}`,
             headers: {
                 accept: 'application/dns-json',
             },
         });
         const answers = resp.body.split(';').map((i) => i.split(',')[0]);
-        if (answers.length === 0) {
+        if (answers.length === 0 || String(answers) === '0') {
             throw new Error('No answers');
         }
         const result = answers[answers.length - 1];
@@ -439,19 +499,31 @@ const DOMAIN_RESOLVERS = {
     },
 };
 
-function ResolveDomainOperator({ provider }) {
+function ResolveDomainOperator({ provider, type: _type, filter, cache }) {
+    if (['IPv6', 'IP4P'].includes(_type) && ['IP-API'].includes(provider)) {
+        throw new Error(`域名解析服务提供方 ${provider} 不支持 ${_type}`);
+    }
+    let type = ['IPv6', 'IP4P'].includes(_type) ? 'IPv6' : 'IPv4';
+
     const resolver = DOMAIN_RESOLVERS[provider];
     if (!resolver) {
-        throw new Error(`Cannot find resolver: ${provider}`);
+        throw new Error(`找不到域名解析服务提供方: ${provider}`);
     }
     return {
         name: 'Resolve Domain Operator',
         func: async (proxies) => {
+            proxies.forEach((p, i) => {
+                if (!p['_no-resolve'] && p['no-resolve']) {
+                    proxies[i]['_no-resolve'] = p['no-resolve'];
+                }
+            });
             const results = {};
             const limit = 15; // more than 20 concurrency may result in surge TCP connection shortage.
             const totalDomain = [
                 ...new Set(
-                    proxies.filter((p) => !isIP(p.server)).map((c) => c.server),
+                    proxies
+                        .filter((p) => !isIP(p.server) && !p['_no-resolve'])
+                        .map((c) => c.server),
                 ),
             ];
             const totalBatch = Math.ceil(totalDomain.length / limit);
@@ -459,7 +531,7 @@ function ResolveDomainOperator({ provider }) {
                 const currentBatch = [];
                 for (let domain of totalDomain.splice(0, limit)) {
                     currentBatch.push(
-                        resolver(domain)
+                        resolver(domain, type, cache === 'disabled')
                             .then((ip) => {
                                 results[domain] = ip;
                                 $.info(
@@ -475,11 +547,53 @@ function ResolveDomainOperator({ provider }) {
                 }
                 await Promise.all(currentBatch);
             }
-            proxies.forEach((proxy) => {
-                proxy.server = results[proxy.server] || proxy.server;
+            proxies.forEach((p) => {
+                if (!p['_no-resolve']) {
+                    if (results[p.server]) {
+                        if (_type === 'IP4P') {
+                            const { server, port } = parseIP4P(
+                                results[p.server],
+                            );
+                            if (server && port) {
+                                p._domain = p.server;
+                                p.server = server;
+                                p.port = port;
+                                p.resolved = true;
+                                p._IPv4 = p.server;
+                                if (!isIP(p._IP)) {
+                                    p._IP = p.server;
+                                }
+                            } else {
+                                p.resolved = false;
+                            }
+                        } else {
+                            p._domain = p.server;
+                            p.server = results[p.server];
+                            p.resolved = true;
+                            p[`_${type}`] = p.server;
+                            if (!isIP(p._IP)) {
+                                p._IP = p.server;
+                            }
+                        }
+                    } else {
+                        p.resolved = false;
+                    }
+                }
             });
 
-            return proxies;
+            return proxies.filter((p) => {
+                if (filter === 'removeFailed') {
+                    return isIP(p.server) || p['_no-resolve'] || p.resolved;
+                } else if (filter === 'IPOnly') {
+                    return isIP(p.server);
+                } else if (filter === 'IPv4Only') {
+                    return isIPv4(p.server);
+                } else if (filter === 'IPv6Only') {
+                    return isIPv6(p.server);
+                } else {
+                    return true;
+                }
+            });
         },
     };
 }
@@ -520,6 +634,8 @@ function RegionFilter(regions) {
         SG: '🇸🇬',
         JP: '🇯🇵',
         UK: '🇬🇧',
+        DE: '🇩🇪',
+        KR: '🇰🇷',
     };
     return {
         name: 'Region Filter',
@@ -596,6 +712,28 @@ function ScriptFilter(script, targetPlatform, $arguments, source) {
             })();
             return output;
         },
+        nodeFunc: async (proxies) => {
+            let output = FULL(proxies.length, true);
+            await (async function () {
+                const filter = createDynamicFunction(
+                    'filter',
+                    `async function filter(input = []) {
+                        let proxies = input
+                        let list = []
+                        const fn = async ($server) => {
+                            ${script}
+                        }
+                        for await (let $server of proxies) {
+                            list.push(await fn($server))
+                        }
+                        return list
+                      }`,
+                    $arguments,
+                );
+                output = filter(proxies, targetPlatform, { source, ...env });
+            })();
+            return output;
+        },
     };
 }
 
@@ -624,9 +762,32 @@ async function ApplyFilter(filter, objs) {
     try {
         selected = await filter.func(objs);
     } catch (err) {
-        // print log and skip this filter
-        $.error(`Cannot apply filter ${filter.name}\n Reason: ${err}`);
-        throw new Error(`脚本过滤失败 ${err.message ?? err}`);
+        let funcErr = '';
+        let funcErrMsg = `${err.message ?? err}`;
+        if (funcErrMsg.includes('$server is not defined')) {
+            funcErr = '';
+        } else {
+            $.error(
+                `Cannot apply filter ${filter.name}(function filter)! Reason: ${err}`,
+            );
+            funcErr = `执行 function filter 失败 ${funcErrMsg}; `;
+        }
+        try {
+            selected = await filter.nodeFunc(objs);
+        } catch (err) {
+            $.error(
+                `Cannot apply filter ${filter.name}(shortcut script)! Reason: ${err}`,
+            );
+            let nodeErr = '';
+            let nodeErrMsg = `${err.message ?? err}`;
+            if (funcErr && nodeErrMsg === funcErrMsg) {
+                nodeErr = '';
+                funcErr = `执行失败 ${funcErrMsg}`;
+            } else {
+                nodeErr = `执行快捷过滤脚本 失败 ${nodeErrMsg}`;
+            }
+            throw new Error(`脚本过滤 ${funcErr}${nodeErr}`);
+        }
     }
     return objs.filter((_, i) => selected[i]);
 }
@@ -637,14 +798,20 @@ async function ApplyOperator(operator, objs) {
         const output_ = await operator.func(output);
         if (output_) output = output_;
     } catch (err) {
-        $.error(
-            `Cannot apply operator ${operator.name}(function operator)! Reason: ${err}`,
-        );
         let funcErr = '';
         let funcErrMsg = `${err.message ?? err}`;
-        if (funcErrMsg.includes('$server is not defined')) {
+        if (
+            funcErrMsg.includes('$server is not defined') ||
+            funcErrMsg.includes('$content is not defined') ||
+            funcErrMsg.includes('$files is not defined') ||
+            output?.$files ||
+            output?.$content
+        ) {
             funcErr = '';
         } else {
+            $.error(
+                `Cannot apply operator ${operator.name}(function operator)! Reason: ${err}`,
+            );
             funcErr = `执行 function operator 失败 ${funcErrMsg}; `;
         }
         try {
@@ -652,7 +819,7 @@ async function ApplyOperator(operator, objs) {
             if (output_) output = output_;
         } catch (err) {
             $.error(
-                `Cannot apply operator ${operator.name}(node script)! Reason: ${err}`,
+                `Cannot apply operator ${operator.name}(shortcut script)! Reason: ${err}`,
             );
             let nodeErr = '';
             let nodeErrMsg = `${err.message ?? err}`;
@@ -660,7 +827,7 @@ async function ApplyOperator(operator, objs) {
                 nodeErr = '';
                 funcErr = `执行失败 ${funcErrMsg}`;
             } else {
-                nodeErr = `执行节点快捷脚本 失败 ${nodeErr}`;
+                nodeErr = `执行快捷脚本 失败 ${nodeErrMsg}`;
             }
             throw new Error(`脚本操作 ${funcErr}${nodeErr}`);
         }
@@ -705,12 +872,19 @@ function clone(object) {
 // remove flag
 function removeFlag(str) {
     return str
-        .replace(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/g, '')
+        .replace(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]|🏴‍☠️|🏳️‍🌈/g, '')
         .trim();
 }
 
 function createDynamicFunction(name, script, $arguments) {
-    const flowUtils = { getFlowHeaders, parseFlowHeaders, flowTransfer };
+    const flowUtils = {
+        getFlowField,
+        getFlowHeaders,
+        parseFlowHeaders,
+        flowTransfer,
+        validCheck,
+        getRmainingDays,
+    };
     if ($.env.isLoon) {
         return new Function(
             '$arguments',
@@ -722,6 +896,7 @@ function createDynamicFunction(name, script, $arguments) {
             'ProxyUtils',
             'scriptResourceCache',
             'flowUtils',
+            'produceArtifact',
             `${script}\n return ${name}`,
         )(
             $arguments,
@@ -736,6 +911,7 @@ function createDynamicFunction(name, script, $arguments) {
             ProxyUtils,
             scriptResourceCache,
             flowUtils,
+            produceArtifact,
         );
     } else {
         return new Function(
@@ -745,8 +921,17 @@ function createDynamicFunction(name, script, $arguments) {
             'ProxyUtils',
             'scriptResourceCache',
             'flowUtils',
+            'produceArtifact',
 
             `${script}\n return ${name}`,
-        )($arguments, $, lodash, ProxyUtils, scriptResourceCache, flowUtils);
+        )(
+            $arguments,
+            $,
+            lodash,
+            ProxyUtils,
+            scriptResourceCache,
+            flowUtils,
+            produceArtifact,
+        );
     }
 }

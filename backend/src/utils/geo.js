@@ -1,3 +1,107 @@
+import $ from '@/core/app';
+
+const ISOFlags = {
+    '🏳️‍🌈': ['EXP', 'BAND'],
+    '🇸🇱': ['TEST', 'SOS'],
+    '🇦🇩': ['AD', 'AND'],
+    '🇦🇪': ['AE', 'ARE'],
+    '🇦🇫': ['AF', 'AFG'],
+    '🇦🇱': ['AL', 'ALB'],
+    '🇦🇲': ['AM', 'ARM'],
+    '🇦🇷': ['AR', 'ARG'],
+    '🇦🇹': ['AT', 'AUT'],
+    '🇦🇺': ['AU', 'AUS'],
+    '🇦🇿': ['AZ', 'AZE'],
+    '🇧🇦': ['BA', 'BIH'],
+    '🇧🇩': ['BD', 'BGD'],
+    '🇧🇪': ['BE', 'BEL'],
+    '🇧🇬': ['BG', 'BGR'],
+    '🇧🇭': ['BH', 'BHR'],
+    '🇧🇷': ['BR', 'BRA'],
+    '🇧🇾': ['BY', 'BLR'],
+    '🇨🇦': ['CA', 'CAN'],
+    '🇨🇭': ['CH', 'CHE'],
+    '🇨🇱': ['CL', 'CHL'],
+    '🇨🇴': ['CO', 'COL'],
+    '🇨🇷': ['CR', 'CRI'],
+    '🇨🇾': ['CY', 'CYP'],
+    '🇨🇿': ['CZ', 'CZE'],
+    '🇩🇪': ['DE', 'DEU'],
+    '🇩🇰': ['DK', 'DNK'],
+    '🇪🇨': ['EC', 'ECU'],
+    '🇪🇪': ['EE', 'EST'],
+    '🇪🇬': ['EG', 'EGY'],
+    '🇪🇸': ['ES', 'ESP'],
+    '🇪🇺': ['EU'],
+    '🇫🇮': ['FI', 'FIN'],
+    '🇫🇷': ['FR', 'FRA'],
+    '🇬🇧': ['GB', 'GBR', 'UK'],
+    '🇬🇪': ['GE', 'GEO'],
+    '🇬🇷': ['GR', 'GRC'],
+    '🇭🇰': ['HK', 'HKG', 'HKT', 'HKBN', 'HGC', 'WTT', 'CMI'],
+    '🇭🇷': ['HR', 'HRV'],
+    '🇭🇺': ['HU', 'HUN'],
+    '🇯🇴': ['JO', 'JOR'],
+    '🇯🇵': ['JP', 'JPN', 'TYO'],
+    '🇰🇪': ['KE', 'KEN'],
+    '🇰🇬': ['KG', 'KGZ'],
+    '🇰🇭': ['KH', 'KGZ'],
+    '🇰🇵': ['KP', 'PRK'],
+    '🇰🇷': ['KR', 'KOR', 'SEL'],
+    '🇰🇿': ['KZ', 'KAZ'],
+    '🇮🇩': ['ID', 'IDN'],
+    '🇮🇪': ['IE', 'IRL'],
+    '🇮🇱': ['IL', 'ISR'],
+    '🇮🇲': ['IM', 'IMN'],
+    '🇮🇳': ['IN', 'IND'],
+    '🇮🇷': ['IR', 'IRN'],
+    '🇮🇸': ['IS', 'ISL'],
+    '🇮🇹': ['IT', 'ITA'],
+    '🇱🇹': ['LT', 'LTU'],
+    '🇱🇺': ['LU', 'LUX'],
+    '🇱🇻': ['LV', 'LVA'],
+    '🇲🇦': ['MA', 'MAR'],
+    '🇲🇩': ['MD', 'MDA'],
+    '🇳🇬': ['NG', 'NGA'],
+    '🇲🇰': ['MK', 'MKD'],
+    '🇲🇳': ['MN', 'MNG'],
+    '🇲🇴': ['MO', 'MAC', 'CTM'],
+    '🇲🇹': ['MT', 'MLT'],
+    '🇲🇽': ['MX', 'MEX'],
+    '🇲🇾': ['MY', 'MYS'],
+    '🇳🇱': ['NL', 'NLD', 'AMS'],
+    '🇳🇴': ['NO', 'NOR'],
+    '🇳🇵': ['NP', 'NPL'],
+    '🇳🇿': ['NZ', 'NZL'],
+    '🇵🇦': ['PA', 'PAN'],
+    '🇵🇪': ['PE', 'PER'],
+    '🇵🇭': ['PH', 'PHL'],
+    '🇵🇰': ['PK', 'PAK'],
+    '🇵🇱': ['PL', 'POL'],
+    '🇵🇷': ['PR', 'PRI'],
+    '🇵🇹': ['PT', 'PRT'],
+    '🇵🇾': ['PY', 'PRY'],
+    '🇷🇴': ['RO', 'ROU'],
+    '🇷🇸': ['RS', 'SRB'],
+    '🇷🇪': ['RE', 'REU'],
+    '🇷🇺': ['RU', 'RUS'],
+    '🇸🇦': ['SA', 'SAU'],
+    '🇸🇪': ['SE', 'SWE'],
+    '🇸🇬': ['SG', 'SGP'],
+    '🇸🇮': ['SI', 'SVN'],
+    '🇸🇰': ['SK', 'SVK'],
+    '🇹🇭': ['TH', 'THA'],
+    '🇹🇳': ['TN', 'TUN'],
+    '🇹🇷': ['TR', 'TUR'],
+    '🇹🇼': ['TW', 'TWN', 'CHT', 'HINET', 'ROC'],
+    '🇺🇦': ['UA', 'UKR'],
+    '🇺🇸': ['US', 'USA', 'LAX', 'SFO', 'SJC'],
+    '🇺🇾': ['UY', 'URY'],
+    '🇻🇪': ['VE', 'VEN'],
+    '🇻🇳': ['VN', 'VNM'],
+    '🇿🇦': ['ZA', 'ZAF', 'JNB'],
+    '🇨🇳': ['CN', 'CHN', 'BACK'],
+};
 // get proxy flag according to its name
 export function getFlag(name) {
     // flags from @KOP-XIAO: https://github.com/KOP-XIAO/QuantumultX/blob/master/Scripts/resource-parser.js
@@ -65,6 +169,7 @@ export function getFlag(name) {
             '广德',
             '法兰克福',
             'Frankfurt',
+            '德意志',
         ],
         '🇩🇰': ['Denmark', '丹麦', '丹麥'],
         '🇪🇨': ['Ecuador', '厄瓜多尔'],
@@ -213,11 +318,16 @@ export function getFlag(name) {
         '🇹🇼': [
             'Taiwan',
             '台湾',
+            '臺灣',
+            '台灣',
+            '中華民國',
+            '中华民国',
             '台北',
             '台中',
             '新北',
             '彰化',
             '台',
+            '臺',
             'Taipei',
         ],
         '🇺🇦': ['Ukraine', '乌克兰', '烏克蘭'],
@@ -278,108 +388,6 @@ export function getFlag(name) {
         ],
     };
 
-    const ISOFlags = {
-        '🏳️‍🌈': ['EXP', 'BAND'],
-        '🇸🇱': ['TEST', 'SOS'],
-        '🇦🇩': ['AD', 'AND'],
-        '🇦🇪': ['AE', 'ARE'],
-        '🇦🇫': ['AF', 'AFG'],
-        '🇦🇱': ['AL', 'ALB'],
-        '🇦🇲': ['AM', 'ARM'],
-        '🇦🇷': ['AR', 'ARG'],
-        '🇦🇹': ['AT', 'AUT'],
-        '🇦🇺': ['AU', 'AUS'],
-        '🇦🇿': ['AZ', 'AZE'],
-        '🇧🇦': ['BA', 'BIH'],
-        '🇧🇩': ['BD', 'BGD'],
-        '🇧🇪': ['BE', 'BEL'],
-        '🇧🇬': ['BG', 'BGR'],
-        '🇧🇭': ['BH', 'BHR'],
-        '🇧🇷': ['BR', 'BRA'],
-        '🇧🇾': ['BY', 'BLR'],
-        '🇨🇦': ['CA', 'CAN'],
-        '🇨🇭': ['CH', 'CHE'],
-        '🇨🇱': ['CL', 'CHL'],
-        '🇨🇴': ['CO', 'COL'],
-        '🇨🇷': ['CR', 'CRI'],
-        '🇨🇾': ['CY', 'CYP'],
-        '🇨🇿': ['CZ', 'CZE'],
-        '🇩🇪': ['DE', 'DEU'],
-        '🇩🇰': ['DK', 'DNK'],
-        '🇪🇨': ['EC', 'ECU'],
-        '🇪🇪': ['EE', 'EST'],
-        '🇪🇬': ['EG', 'EGY'],
-        '🇪🇸': ['ES', 'ESP'],
-        '🇪🇺': ['EU'],
-        '🇫🇮': ['FI', 'FIN'],
-        '🇫🇷': ['FR', 'FRA'],
-        '🇬🇧': ['GB', 'GBR', 'UK'],
-        '🇬🇪': ['GE', 'GEO'],
-        '🇬🇷': ['GR', 'GRC'],
-        '🇭🇰': ['HK', 'HKG', 'HKT', 'HKBN', 'HGC', 'WTT', 'CMI'],
-        '🇭🇷': ['HR', 'HRV'],
-        '🇭🇺': ['HU', 'HUN'],
-        '🇯🇴': ['JO', 'JOR'],
-        '🇯🇵': ['JP', 'JPN'],
-        '🇰🇪': ['KE', 'KEN'],
-        '🇰🇬': ['KG', 'KGZ'],
-        '🇰🇭': ['KH', 'KGZ'],
-        '🇰🇵': ['KP', 'PRK'],
-        '🇰🇷': ['KR', 'KOR'],
-        '🇰🇿': ['KZ', 'KAZ'],
-        '🇮🇩': ['ID', 'IDN'],
-        '🇮🇪': ['IE', 'IRL'],
-        '🇮🇱': ['IL', 'ISR'],
-        '🇮🇲': ['IM', 'IMN'],
-        '🇮🇳': ['IN', 'IND'],
-        '🇮🇷': ['IR', 'IRN'],
-        '🇮🇸': ['IS', 'ISL'],
-        '🇮🇹': ['IT', 'ITA'],
-        '🇱🇹': ['LT', 'LTU'],
-        '🇱🇺': ['LU', 'LUX'],
-        '🇱🇻': ['LV', 'LVA'],
-        '🇲🇦': ['MA', 'MAR'],
-        '🇲🇩': ['MD', 'MDA'],
-        '🇳🇬': ['NG', 'NGA'],
-        '🇲🇰': ['MK', 'MKD'],
-        '🇲🇳': ['MN', 'MNG'],
-        '🇲🇴': ['MO', 'MAC', 'CTM'],
-        '🇲🇹': ['MT', 'MLT'],
-        '🇲🇽': ['MX', 'MEX'],
-        '🇲🇾': ['MY', 'MYS'],
-        '🇳🇱': ['NL', 'NLD'],
-        '🇳🇴': ['NO', 'NOR'],
-        '🇳🇵': ['NP', 'NPL'],
-        '🇳🇿': ['NZ', 'NZL'],
-        '🇵🇦': ['PA', 'PAN'],
-        '🇵🇪': ['PE', 'PER'],
-        '🇵🇭': ['PH', 'PHL'],
-        '🇵🇰': ['PK', 'PAK'],
-        '🇵🇱': ['PL', 'POL'],
-        '🇵🇷': ['PR', 'PRI'],
-        '🇵🇹': ['PT', 'PRT'],
-        '🇵🇾': ['PY', 'PRY'],
-        '🇷🇴': ['RO', 'ROU'],
-        '🇷🇸': ['RS', 'SRB'],
-        '🇷🇪': ['RE', 'REU'],
-        '🇷🇺': ['RU', 'RUS'],
-        '🇸🇦': ['SA', 'SAU'],
-        '🇸🇪': ['SE', 'SWE'],
-        '🇸🇬': ['SG', 'SGP'],
-        '🇸🇮': ['SI', 'SVN'],
-        '🇸🇰': ['SK', 'SVK'],
-        '🇹🇭': ['TH', 'THA'],
-        '🇹🇳': ['TN', 'TUN'],
-        '🇹🇷': ['TR', 'TUR'],
-        '🇹🇼': ['TW', 'TWN', 'CHT', 'HINET'],
-        '🇺🇦': ['UA', 'UKR'],
-        '🇺🇸': ['US', 'USA', 'LAX', 'SFO'],
-        '🇺🇾': ['UY', 'URY'],
-        '🇻🇪': ['VE', 'VEN'],
-        '🇻🇳': ['VN', 'VNM'],
-        '🇿🇦': ['ZA', 'ZAF'],
-        '🇨🇳': ['CN', 'CHN', 'BACK'],
-    };
     // 原旗帜或空
     let Flag =
         name.match(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/)?.[0] ||
@@ -393,7 +401,9 @@ export function getFlag(name) {
             // 不精确匹配（只要包含就算,忽略大小写)
             keywords.some((keyword) => RegExp(`${keyword}`, 'i').test(name))
         ) {
-            //console.log(`newFlag = ${flag}`)
+            if (/内蒙古/.test(name) && ['🇲🇳'].includes(flag)) {
+                return (Flag = '🇨🇳');
+            }
             return (Flag = flag);
         }
     }
@@ -411,6 +421,49 @@ export function getFlag(name) {
             return (Flag = flag);
         }
     }
+
     //console.log(`Final Flag = ${Flag}`)
     return Flag;
+}
+
+export function getISO(name) {
+    return ISOFlags[getFlag(name)]?.[0];
+}
+
+export class MMDB {
+    constructor({ country, asn } = {}) {
+        if ($.env.isNode) {
+            const Reader = eval(`require("@maxmind/geoip2-node")`).Reader;
+            const fs = eval("require('fs')");
+            const countryFile =
+                country || eval('process.env.SUB_STORE_MMDB_COUNTRY_PATH');
+            const asnFile = asn || eval('process.env.SUB_STORE_MMDB_ASN_PATH');
+            // $.info(
+            //     `GeoLite2 Country MMDB: ${countryFile}, exists: ${fs.existsSync(
+            //         countryFile,
+            //     )}`,
+            // );
+            if (countryFile) {
+                this.countryReader = Reader.openBuffer(
+                    fs.readFileSync(countryFile),
+                );
+            }
+            // $.info(
+            //     `GeoLite2 ASN MMDB: ${asnFile}, exists: ${fs.existsSync(
+            //         asnFile,
+            //     )}`,
+            // );
+            if (asnFile) {
+                if (!fs.existsSync(asnFile))
+                    throw new Error('GeoLite2 ASN MMDB does not exist');
+                this.asnReader = Reader.openBuffer(fs.readFileSync(asnFile));
+            }
+        }
+    }
+    geoip(ip) {
+        return this.countryReader?.country(ip)?.country?.isoCode;
+    }
+    ipaso(ip) {
+        return this.asnReader?.asn(ip)?.autonomousSystemOrganization;
+    }
 }

@@ -1,8 +1,7 @@
 /* eslint-disable no-undef */
 import { ENV } from './open-api';
 
-export default function express({ substore: $, port }) {
-    port = port || 3000;
+export default function express({ substore: $, port, host }) {
     const { isNode } = ENV();
     const DEFAULT_HEADERS = {
         'Content-Type': 'text/plain;charset=UTF-8',
@@ -29,8 +28,9 @@ export default function express({ substore: $, port }) {
 
         // adapter
         app.start = () => {
-            app.listen(port, () => {
-                $.info(`Express started on port: ${port}`);
+            const listener = app.listen(port, host, () => {
+                const { address, port } = listener.address();
+                $.info(`[BACKEND] ${address}:${port}`);
             });
         };
         return app;
@@ -161,7 +161,7 @@ export default function express({ substore: $, port }) {
 
     function Response() {
         let statusCode = 200;
-        const { isQX, isLoon, isSurge } = ENV();
+        const { isQX, isLoon, isSurge, isGUIforCores } = ENV();
         const headers = DEFAULT_HEADERS;
         const STATUS_CODE_MAP = {
             200: 'HTTP/1.1 200 OK',
@@ -184,7 +184,7 @@ export default function express({ substore: $, port }) {
                     body,
                     headers,
                 };
-                if (isQX) {
+                if (isQX || isGUIforCores) {
                     $done(response);
                 } else if (isLoon || isSurge) {
                     $done({

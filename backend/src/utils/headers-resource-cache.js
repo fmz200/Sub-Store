@@ -1,25 +1,25 @@
 import $ from '@/core/app';
 import {
-    SCRIPT_RESOURCE_CACHE_KEY,
-    CSR_EXPIRATION_TIME_KEY,
+    HEADERS_RESOURCE_CACHE_KEY,
+    CHR_EXPIRATION_TIME_KEY,
 } from '@/constants';
 
 class ResourceCache {
     constructor() {
         this.expires = getExpiredTime();
-        if (!$.read(SCRIPT_RESOURCE_CACHE_KEY)) {
-            $.write('{}', SCRIPT_RESOURCE_CACHE_KEY);
+        if (!$.read(HEADERS_RESOURCE_CACHE_KEY)) {
+            $.write('{}', HEADERS_RESOURCE_CACHE_KEY);
         }
         try {
-            this.resourceCache = JSON.parse($.read(SCRIPT_RESOURCE_CACHE_KEY));
+            this.resourceCache = JSON.parse($.read(HEADERS_RESOURCE_CACHE_KEY));
         } catch (e) {
             $.error(
-                `解析持久化缓存中的 ${SCRIPT_RESOURCE_CACHE_KEY} 失败, 重置为 {}, 错误: ${
+                `解析持久化缓存中的 ${HEADERS_RESOURCE_CACHE_KEY} 失败, 重置为 {}, 错误: ${
                     e?.message ?? e
                 }`,
             );
             this.resourceCache = {};
-            $.write('{}', SCRIPT_RESOURCE_CACHE_KEY);
+            $.write('{}', HEADERS_RESOURCE_CACHE_KEY);
         }
         this._cleanup();
     }
@@ -49,7 +49,7 @@ class ResourceCache {
     }
 
     _persist() {
-        $.write(JSON.stringify(this.resourceCache), SCRIPT_RESOURCE_CACHE_KEY);
+        $.write(JSON.stringify(this.resourceCache), HEADERS_RESOURCE_CACHE_KEY);
     }
 
     get(id) {
@@ -75,11 +75,11 @@ class ResourceCache {
 }
 
 function getExpiredTime() {
-    // console.log($.read(CSR_EXPIRATION_TIME_KEY));
-    if (!$.read(CSR_EXPIRATION_TIME_KEY)) {
-        $.write('1728e5', CSR_EXPIRATION_TIME_KEY); // 48 * 3600 * 1000
+    // console.log($.read(CHR_EXPIRATION_TIME_KEY));
+    if (!$.read(CHR_EXPIRATION_TIME_KEY)) {
+        $.write('6e4', CHR_EXPIRATION_TIME_KEY); // 1分钟
     }
-    let expiration = 1728e5;
+    let expiration = 6e4;
     if ($.env.isLoon) {
         const loont = {
             // Loon 插件自义定
@@ -97,7 +97,9 @@ function getExpiredTime() {
             '72\u5c0f\u65f6': 2592e5, // "72小时"
             '\u53c2\u6570\u4f20\u5165': 'readcachets', // "参数输入"
         };
-        let intimed = $.read('#\u8282\u70b9\u7f13\u5b58\u6709\u6548\u671f'); // Loon #节点缓存有效期
+        let intimed = $.read(
+            '#\u54cd\u5e94\u5934\u7f13\u5b58\u6709\u6548\u671f',
+        ); // Loon #响应头缓存有效期
         // console.log(intimed);
         if (intimed in loont) {
             expiration = loont[intimed];
@@ -107,7 +109,7 @@ function getExpiredTime() {
         }
         return expiration;
     } else {
-        expiration = $.read(CSR_EXPIRATION_TIME_KEY);
+        expiration = $.read(CHR_EXPIRATION_TIME_KEY);
         return expiration;
     }
 }

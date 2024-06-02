@@ -1,4 +1,4 @@
-export function getPlatformFromHeaders(headers) {
+export function getUserAgentFromHeaders(headers) {
     const keys = Object.keys(headers);
     let UA = '';
     let ua = '';
@@ -9,8 +9,13 @@ export function getPlatformFromHeaders(headers) {
             break;
         }
     }
+    return { UA, ua };
+}
+export function getPlatformFromUserAgent({ ua, UA }) {
     if (UA.indexOf('Quantumult%20X') !== -1) {
         return 'QX';
+    } else if (UA.indexOf('Surfboard') !== -1) {
+        return 'Surfboard';
     } else if (UA.indexOf('Surge Mac') !== -1) {
         return 'SurgeMac';
     } else if (UA.indexOf('Surge') !== -1) {
@@ -18,7 +23,7 @@ export function getPlatformFromHeaders(headers) {
     } else if (UA.indexOf('Decar') !== -1 || UA.indexOf('Loon') !== -1) {
         return 'Loon';
     } else if (UA.indexOf('Shadowrocket') !== -1) {
-        return 'ShadowRocket';
+        return 'Shadowrocket';
     } else if (UA.indexOf('Stash') !== -1) {
         return 'Stash';
     } else if (
@@ -30,7 +35,13 @@ export function getPlatformFromHeaders(headers) {
         return 'Clash';
     } else if (ua.indexOf('v2ray') !== -1) {
         return 'V2Ray';
+    } else if (ua.indexOf('sing-box') !== -1) {
+        return 'sing-box';
     } else {
         return 'JSON';
     }
+}
+export function getPlatformFromHeaders(headers) {
+    const { UA, ua } = getUserAgentFromHeaders(headers);
+    return getPlatformFromUserAgent({ ua, UA });
 }

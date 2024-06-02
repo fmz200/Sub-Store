@@ -1,10 +1,22 @@
+import YAML from '@/utils/yaml';
 import download from '@/utils/download';
-import { isIPv4, isIPv6 } from '@/utils';
+import {
+    isIPv4,
+    isIPv6,
+    isValidPortNumber,
+    isNotBlank,
+    utf8ArrayToStr,
+} from '@/utils';
 import PROXY_PROCESSORS, { ApplyProcessor } from './processors';
 import PROXY_PREPROCESSORS from './preprocessors';
 import PROXY_PRODUCERS from './producers';
 import PROXY_PARSERS from './parsers';
 import $ from '@/core/app';
+import { FILES_KEY, MODULES_KEY } from '@/constants';
+import { findByName } from '@/utils/database';
+import { produceArtifact } from '@/restful/sync';
+import { getFlag, getISO, MMDB } from '@/utils/geo';
+import Gist from '@/utils/gist';
 
 function preprocess(raw) {
     for (const processor of PROXY_PREPROCESSORS) {
@@ -59,11 +71,10 @@ function parse(raw) {
             $.error(`Failed to parse line: ${line}`);
         }
     }
-
     return proxies;
 }
 
-async function process(proxies, operators = [], targetPlatform, source) {
+async function processFn(proxies, operators = [], targetPlatform, source) {
     for (const item of operators) {
         // process script
         let script;
@@ -95,18 +106,50 @@ async function process(proxies, operators = [], targetPlatform, source) {
                         }
                     }
                 }
+                url = `${url.split('#')[0]}${noCache ? '#noCache' : ''}`;
+                const downloadUrlMatch = url.match(
+                    /^\/api\/(file|module)\/(.+)/,
+                );
+                if (downloadUrlMatch) {
+                    let type = '';
+                    try {
+                        type = downloadUrlMatch?.[1];
+                        let name = downloadUrlMatch?.[2];
+                        if (name == null) {
+                            throw new Error(`本地 ${type} URL 无效: ${url}`);
+                        }
+                        name = decodeURIComponent(name);
+                        const key = type === 'module' ? MODULES_KEY : FILES_KEY;
+                        const item = findByName($.read(key), name);
+                        if (!item) {
+                            throw new Error(`找不到 ${type}: ${name}`);
+                        }
 
-                // if this is a remote script, download it
-                try {
-                    script = await download(
-                        `${url.split('#')[0]}${noCache ? '#noCache' : ''}`,
-                    );
-                    // $.info(`Script loaded: >>>\n ${script}`);
-                } catch (err) {
-                    $.error(
-                        `Error when downloading remote script: ${item.args.content}.\n Reason: ${err}`,
-                    );
-                    throw new Error(`无法下载脚本: ${url}`);
+                        if (type === 'module') {
+                            script = item.content;
+                        } else {
+                            script = await produceArtifact({
+                                type: 'file',
+                                name,
+                            });
+                        }
+                    } catch (err) {
+                        $.error(
+                            `Error when loading ${type}: ${item.args.content}.\n Reason: ${err}`,
+                        );
+                        throw new Error(`无法加载 ${type}: ${url}`);
+                    }
+                } else {
+                    // if this is a remote script, download it
+                    try {
+                        script = await download(url);
+                        // $.info(`Script loaded: >>>\n ${script}`);
+                    } catch (err) {
+                        $.error(
+                            `Error when downloading remote script: ${item.args.content}.\n Reason: ${err}`,
+                        );
+                        throw new Error(`无法下载脚本: ${url}`);
+                    }
                 }
             } else {
                 script = content;
@@ -118,7 +161,7 @@ async function process(proxies, operators = [], targetPlatform, source) {
             continue;
         }
 
-        $.info(
+        $.log(
             `Applying "${item.type}" with arguments:\n >>> ${
                 JSON.stringify(item.args, null, 2) || 'None'
             }`,
@@ -139,11 +182,15 @@ async function process(proxies, operators = [], targetPlatform, source) {
     return proxies;
 }
 
-function produce(proxies, targetPlatform) {
+function produce(proxies, targetPlatform, type, opts = {}) {
     const producer = PROXY_PRODUCERS[targetPlatform];
     if (!producer) {
         throw new Error(`Target platform: ${targetPlatform} is not supported!`);
     }
+
+    const sni_off_supported = /Surge|SurgeMac|Shadowrocket/i.test(
+        targetPlatform,
+    );
 
     // filter unsupported proxies
     proxies = proxies.filter(
@@ -151,13 +198,36 @@ function produce(proxies, targetPlatform) {
             !(proxy.supported && proxy.supported[targetPlatform] === false),
     );
 
-    $.info(`Producing proxies for target: ${targetPlatform}`);
+    proxies = proxies.map((proxy) => {
+        proxy._subName = proxy.subName;
+        proxy._collectionName = proxy.collectionName;
+        proxy._resolved = proxy.resolved;
+
+        if (!isNotBlank(proxy.name)) {
+            proxy.name = `${proxy.type} ${proxy.server}:${proxy.port}`;
+        }
+        if (proxy['disable-sni']) {
+            if (sni_off_supported) {
+                proxy.sni = 'off';
+            } else if (!['tuic'].includes(proxy.type)) {
+                $.error(
+                    `Target platform ${targetPlatform} does not support sni off. Proxy's fields (sni, tls-fingerprint and skip-cert-verify) will be modified.`,
+                );
+                proxy.sni = '';
+                proxy['skip-cert-verify'] = true;
+                delete proxy['tls-fingerprint'];
+            }
+        }
+        return proxy;
+    });
+
+    $.log(`Producing proxies for target: ${targetPlatform}`);
     if (typeof producer.type === 'undefined' || producer.type === 'SINGLE') {
         let localPort = 10000;
-        return proxies
+        let list = proxies
             .map((proxy) => {
                 try {
-                    let line = producer.produce(proxy);
+                    let line = producer.produce(proxy, type, opts);
                     if (
                         line.length > 0 &&
                         line.includes('__SubStoreLocalPort__')
@@ -179,20 +249,36 @@ function produce(proxies, targetPlatform) {
                     return '';
                 }
             })
-            .filter((line) => line.length > 0)
-            .join('\n');
+            .filter((line) => line.length > 0);
+        list = type === 'internal' ? list : list.join('\n');
+        if (
+            targetPlatform.startsWith('Surge') &&
+            proxies.length > 0 &&
+            proxies.every((p) => p.type === 'wireguard')
+        ) {
+            list = `#!name=${proxies[0]?.subName}
+#!desc=${proxies[0]?._desc ?? ''}
+#!category=${proxies[0]?._category ?? ''}
+${list}`;
+        }
+        return list;
     } else if (producer.type === 'ALL') {
-        return producer.produce(proxies);
+        return producer.produce(proxies, type, opts);
     }
 }
 
 export const ProxyUtils = {
     parse,
-    process,
+    process: processFn,
     produce,
     isIPv4,
     isIPv6,
     isIP,
+    yaml: YAML,
+    getFlag,
+    getISO,
+    MMDB,
+    Gist,
 };
 
 function tryParse(parser, line) {
@@ -214,9 +300,41 @@ function safeMatch(parser, line) {
 }
 
 function lastParse(proxy) {
+    if (proxy.interface) {
+        proxy['interface-name'] = proxy.interface;
+        delete proxy.interface;
+    }
+    if (isValidPortNumber(proxy.port)) {
+        proxy.port = parseInt(proxy.port, 10);
+    }
+    if (proxy.server) {
+        proxy.server = `${proxy.server}`
+            .trim()
+            .replace(/^\[/, '')
+            .replace(/\]$/, '');
+    }
+    if (proxy.network === 'ws') {
+        if (!proxy['ws-opts'] && (proxy['ws-path'] || proxy['ws-headers'])) {
+            proxy['ws-opts'] = {};
+            if (proxy['ws-path']) {
+                proxy['ws-opts'].path = proxy['ws-path'];
+            }
+            if (proxy['ws-headers']) {
+                proxy['ws-opts'].headers = proxy['ws-headers'];
+            }
+        }
+        delete proxy['ws-path'];
+        delete proxy['ws-headers'];
+    }
+
     if (proxy.type === 'trojan') {
         if (proxy.network === 'tcp') {
             delete proxy.network;
+        }
+    }
+    if (['vless'].includes(proxy.type)) {
+        if (!proxy.network) {
+            proxy.network = 'tcp';
         }
     }
     if (['trojan', 'tuic', 'hysteria', 'hysteria2'].includes(proxy.type)) {
@@ -225,9 +343,24 @@ function lastParse(proxy) {
     if (proxy.network) {
         let transportHost = proxy[`${proxy.network}-opts`]?.headers?.Host;
         let transporthost = proxy[`${proxy.network}-opts`]?.headers?.host;
-        if (transporthost && !transportHost) {
+        if (proxy.network === 'h2') {
+            if (!transporthost && transportHost) {
+                proxy[`${proxy.network}-opts`].headers.host = transportHost;
+                delete proxy[`${proxy.network}-opts`].headers.Host;
+            }
+        } else if (transporthost && !transportHost) {
             proxy[`${proxy.network}-opts`].headers.Host = transporthost;
             delete proxy[`${proxy.network}-opts`].headers.host;
+        }
+    }
+    if (proxy.network === 'h2') {
+        const host = proxy['h2-opts']?.headers?.host;
+        const path = proxy['h2-opts']?.path;
+        if (host && !Array.isArray(host)) {
+            proxy['h2-opts'].headers.host = [host];
+        }
+        if (Array.isArray(path)) {
+            proxy['h2-opts'].path = path[0];
         }
     }
     if (proxy.tls && !proxy.sni) {
@@ -269,6 +402,43 @@ function lastParse(proxy) {
         if (transportPath && !Array.isArray(transportPath)) {
             proxy[`${proxy.network}-opts`].path = [transportPath];
         }
+    }
+    if (['hysteria', 'hysteria2'].includes(proxy.type) && !proxy.ports) {
+        delete proxy.ports;
+    }
+    if (['vless'].includes(proxy.type)) {
+        // 非 reality, 空 flow 没有意义
+        if (!proxy['reality-opts'] && !proxy.flow) {
+            delete proxy.flow;
+        }
+        if (['http'].includes(proxy.network)) {
+            let transportPath = proxy[`${proxy.network}-opts`]?.path;
+            if (!transportPath) {
+                if (!proxy[`${proxy.network}-opts`]) {
+                    proxy[`${proxy.network}-opts`] = {};
+                }
+                proxy[`${proxy.network}-opts`].path = ['/'];
+            }
+        }
+    }
+    if (typeof proxy.name !== 'string') {
+        if (/^\d+$/.test(proxy.name)) {
+            proxy.name = `${proxy.name}`;
+        } else {
+            try {
+                if (proxy.name?.data) {
+                    proxy.name = Buffer.from(proxy.name.data).toString('utf8');
+                } else {
+                    proxy.name = utf8ArrayToStr(proxy.name);
+                }
+            } catch (e) {
+                $.error(`proxy.name decode failed\nReason: ${e}`);
+                proxy.name = `${proxy.type} ${proxy.server}:${proxy.port}`;
+            }
+        }
+    }
+    if (['', 'off'].includes(proxy.sni)) {
+        proxy['disable-sni'] = true;
     }
     return proxy;
 }
