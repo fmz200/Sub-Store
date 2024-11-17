@@ -24,6 +24,7 @@ if (isLanceX) backend = 'LanceX';
 if (isGUIforCores) backend = 'GUI.for.Cores';
 
 let meta = {};
+let feature = {};
 
 try {
     if (typeof $environment !== 'undefined') {
@@ -63,5 +64,6 @@ try {
 export default {
     backend,
     version: substoreVersion,
+    feature,
     meta,
 };

@@ -15,9 +15,12 @@ const ipVersions = {
 export default function Surge_Producer() {
     const produce = (proxy, type, opts = {}) => {
         proxy.name = proxy.name.replace(/=|,/g, '');
+        if (proxy.ports) {
+            proxy.ports = String(proxy.ports);
+        }
         switch (proxy.type) {
             case 'ss':
-                return shadowsocks(proxy);
+                return shadowsocks(proxy, opts['include-unsupported-proxy']);
             case 'trojan':
                 return trojan(proxy);
             case 'vmess':
@@ -48,7 +51,7 @@ export default function Surge_Producer() {
     return { produce };
 }
 
-function shadowsocks(proxy) {
+function shadowsocks(proxy, includeUnsupportedProxy) {
     const result = new Result(proxy);
     result.append(`${proxy.name}=${proxy.type},${proxy.server},${proxy.port}`);
     if (!proxy.cipher) {
@@ -82,12 +85,15 @@ function shadowsocks(proxy) {
             'chacha20',
             'chacha20-ietf',
             'none',
+            ...(includeUnsupportedProxy
+                ? ['2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm']
+                : []),
         ].includes(proxy.cipher)
     ) {
         throw new Error(`cipher ${proxy.cipher} is not supported`);
     }
     result.append(`,encrypt-method=${proxy.cipher}`);
-    result.appendIfPresent(`,password=${proxy.password}`, 'password');
+    result.appendIfPresent(`,password="${proxy.password}"`, 'password');
 
     const ip_version = ipVersions[proxy['ip-version']] || proxy['ip-version'];
     result.appendIfPresent(`,ip-version=${ip_version}`, 'ip-version');
@@ -119,6 +125,8 @@ function shadowsocks(proxy) {
 
     // udp
     result.appendIfPresent(`,udp-relay=${proxy.udp}`, 'udp');
+    // udp-port
+    result.appendIfPresent(`,udp-port=${proxy['udp-port']}`, 'udp-port');
 
     // test-url
     result.appendIfPresent(`,test-url=${proxy['test-url']}`, 'test-url');
@@ -185,7 +193,7 @@ function shadowsocks(proxy) {
 function trojan(proxy) {
     const result = new Result(proxy);
     result.append(`${proxy.name}=${proxy.type},${proxy.server},${proxy.port}`);
-    result.appendIfPresent(`,password=${proxy.password}`, 'password');
+    result.appendIfPresent(`,password="${proxy.password}"`, 'password');
 
     const ip_version = ipVersions[proxy['ip-version']] || proxy['ip-version'];
     result.appendIfPresent(`,ip-version=${ip_version}`, 'ip-version');
@@ -358,7 +366,7 @@ function ssh(proxy) {
     result.append(`${proxy.name}=ssh,${proxy.server},${proxy.port}`);
     result.appendIfPresent(`,${proxy.username}`, 'username');
     // 所有的类似的字段都有双引号的问题 暂不处理
-    result.appendIfPresent(`,${proxy.password}`, 'password');
+    result.appendIfPresent(`,"${proxy.password}"`, 'password');
 
     // https://manual.nssurge.com/policy/ssh.html
     // 需配合 Keystore
@@ -423,7 +431,7 @@ function http(proxy) {
     const type = proxy.tls ? 'https' : 'http';
     result.append(`${proxy.name}=${type},${proxy.server},${proxy.port}`);
     result.appendIfPresent(`,${proxy.username}`, 'username');
-    result.appendIfPresent(`,${proxy.password}`, 'password');
+    result.appendIfPresent(`,"${proxy.password}"`, 'password');
 
     const ip_version = ipVersions[proxy['ip-version']] || proxy['ip-version'];
     result.appendIfPresent(`,ip-version=${ip_version}`, 'ip-version');
@@ -501,7 +509,7 @@ function socks5(proxy) {
     const type = proxy.tls ? 'socks5-tls' : 'socks5';
     result.append(`${proxy.name}=${type},${proxy.server},${proxy.port}`);
     result.appendIfPresent(`,${proxy.username}`, 'username');
-    result.appendIfPresent(`,${proxy.password}`, 'password');
+    result.appendIfPresent(`,"${proxy.password}"`, 'password');
 
     const ip_version = ipVersions[proxy['ip-version']] || proxy['ip-version'];
     result.appendIfPresent(`,ip-version=${ip_version}`, 'ip-version');
@@ -667,12 +675,21 @@ function tuic(proxy) {
     result.append(`${proxy.name}=${type},${proxy.server},${proxy.port}`);
 
     result.appendIfPresent(`,uuid=${proxy.uuid}`, 'uuid');
-    result.appendIfPresent(`,password=${proxy.password}`, 'password');
+    result.appendIfPresent(`,password="${proxy.password}"`, 'password');
     result.appendIfPresent(`,token=${proxy.token}`, 'token');
 
     result.appendIfPresent(
         `,alpn=${Array.isArray(proxy.alpn) ? proxy.alpn[0] : proxy.alpn}`,
         'alpn',
+    );
+
+    if (isPresent(proxy, 'ports')) {
+        result.append(`,port-hopping="${proxy.ports.replace(/,/g, ';')}"`);
+    }
+
+    result.appendIfPresent(
+        `,port-hopping-interval=${proxy['hop-interval']}`,
+        'hop-interval',
     );
 
     const ip_version = ipVersions[proxy['ip-version']] || proxy['ip-version'];
@@ -933,7 +950,16 @@ function hysteria2(proxy) {
     const result = new Result(proxy);
     result.append(`${proxy.name}=hysteria2,${proxy.server},${proxy.port}`);
 
-    result.appendIfPresent(`,password=${proxy.password}`, 'password');
+    result.appendIfPresent(`,password="${proxy.password}"`, 'password');
+
+    if (isPresent(proxy, 'ports')) {
+        result.append(`,port-hopping="${proxy.ports.replace(/,/g, ';')}"`);
+    }
+
+    result.appendIfPresent(
+        `,port-hopping-interval=${proxy['hop-interval']}`,
+        'hop-interval',
+    );
 
     const ip_version = ipVersions[proxy['ip-version']] || proxy['ip-version'];
     result.appendIfPresent(`,ip-version=${ip_version}`, 'ip-version');

@@ -153,6 +153,14 @@ function trojan(proxy) {
 
     // sni
     result.appendIfPresent(`,tls-name=${proxy.sni}`, 'sni');
+    result.appendIfPresent(
+        `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
+        'tls-fingerprint',
+    );
+    result.appendIfPresent(
+        `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+        'tls-pubkey-sha256',
+    );
 
     // tfo
     result.appendIfPresent(`,fast-open=${proxy.tfo}`, 'tfo');
@@ -215,6 +223,14 @@ function vmess(proxy) {
 
     // sni
     result.appendIfPresent(`,tls-name=${proxy.sni}`, 'sni');
+    result.appendIfPresent(
+        `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
+        'tls-fingerprint',
+    );
+    result.appendIfPresent(
+        `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+        'tls-pubkey-sha256',
+    );
 
     // AEAD
     if (isPresent(proxy, 'aead')) {
@@ -286,6 +302,14 @@ function vless(proxy) {
 
     // sni
     result.appendIfPresent(`,tls-name=${proxy.sni}`, 'sni');
+    result.appendIfPresent(
+        `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
+        'tls-fingerprint',
+    );
+    result.appendIfPresent(
+        `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+        'tls-pubkey-sha256',
+    );
 
     // tfo
     result.appendIfPresent(`,fast-open=${proxy.tfo}`, 'tfo');
@@ -338,6 +362,11 @@ function socks5(proxy) {
 
     // tfo
     result.appendIfPresent(`,tfo=${proxy.tfo}`, 'tfo');
+
+    // udp
+    if (proxy.udp) {
+        result.append(`,udp=true`);
+    }
 
     return result.toString();
 }
@@ -408,8 +437,8 @@ function wireguard(proxy) {
 }
 
 function hysteria2(proxy) {
-    if (proxy.obfs || proxy['obfs-password']) {
-        throw new Error(`obfs is unsupported`);
+    if (proxy['obfs-password'] && proxy.obfs != 'salamander') {
+        throw new Error(`only salamander obfs is supported`);
     }
     const result = new Result(proxy);
     result.append(`${proxy.name}=Hysteria2,${proxy.server},${proxy.port}`);
@@ -419,9 +448,21 @@ function hysteria2(proxy) {
     // sni
     result.appendIfPresent(`,tls-name=${proxy.sni}`, 'sni');
     result.appendIfPresent(
+        `,tls-cert-sha256=${proxy['tls-fingerprint']}`,
+        'tls-fingerprint',
+    );
+    result.appendIfPresent(
+        `,tls-pubkey-sha256=${proxy['tls-pubkey-sha256']}`,
+        'tls-pubkey-sha256',
+    );
+    result.appendIfPresent(
         `,skip-cert-verify=${proxy['skip-cert-verify']}`,
         'skip-cert-verify',
     );
+
+    if (proxy['obfs-password'] && proxy.obfs == 'salamander') {
+        result.append(`,salamander-password=${proxy['obfs-password']}`);
+    }
 
     // tfo
     result.appendIfPresent(`,fast-open=${proxy.tfo}`, 'tfo');

@@ -146,7 +146,8 @@ async function compareSub(req, res) {
         // add id
         original.forEach((proxy, i) => {
             proxy.id = i;
-            proxy.subName = sub.name;
+            proxy._subName = sub.name;
+            proxy._subDisplayName = sub.displayName;
         });
 
         // apply processors
@@ -176,7 +177,20 @@ async function compareCollection(req, res) {
     try {
         const allSubs = $.read(SUBS_KEY);
         const collection = req.body;
-        const subnames = collection.subscriptions;
+        const subnames = [...collection.subscriptions];
+        let subscriptionTags = collection.subscriptionTags;
+        if (Array.isArray(subscriptionTags) && subscriptionTags.length > 0) {
+            allSubs.forEach((sub) => {
+                if (
+                    Array.isArray(sub.tag) &&
+                    sub.tag.length > 0 &&
+                    !subnames.includes(sub.name) &&
+                    sub.tag.some((tag) => subscriptionTags.includes(tag))
+                ) {
+                    subnames.push(sub.name);
+                }
+            });
+        }
         const results = {};
         const errors = {};
         await Promise.all(
@@ -237,8 +251,10 @@ async function compareCollection(req, res) {
                         .flat();
 
                     currentProxies.forEach((proxy) => {
-                        proxy.subName = sub.name;
-                        proxy.collectionName = collection.name;
+                        proxy._subName = sub.name;
+                        proxy._subDisplayName = sub.displayName;
+                        proxy._collectionName = collection.name;
+                        proxy._collectionDisplayName = collection.displayName;
                     });
 
                     // apply processors
@@ -276,7 +292,8 @@ async function compareCollection(req, res) {
 
         original.forEach((proxy, i) => {
             proxy.id = i;
-            proxy.collectionName = collection.name;
+            proxy._collectionName = collection.name;
+            proxy._collectionDisplayName = collection.displayName;
         });
 
         const processed = await ProxyUtils.process(

@@ -293,7 +293,7 @@ export function getFlag(name) {
             '沪俄',
             'Moscow',
         ],
-        '🇸🇦': ['Saudi', '沙特阿拉伯', '沙特'],
+        '🇸🇦': ['Saudi', '沙特阿拉伯', '沙特', 'Riyadh', '利雅得'],
         '🇸🇪': ['Sweden', '瑞典'],
         '🇸🇬': [
             'Singapore',
@@ -329,6 +329,7 @@ export function getFlag(name) {
             '台',
             '臺',
             'Taipei',
+            'Tai Wan',
         ],
         '🇺🇦': ['Ukraine', '乌克兰', '烏克蘭'],
         '🇺🇸': [
@@ -430,6 +431,13 @@ export function getISO(name) {
     return ISOFlags[getFlag(name)]?.[0];
 }
 
+// remove flag
+export function removeFlag(str) {
+    return str
+        .replace(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]|🏴‍☠️|🏳️‍🌈/g, '')
+        .trim();
+}
+
 export class MMDB {
     constructor({ country, asn } = {}) {
         if ($.env.isNode) {
@@ -465,5 +473,8 @@ export class MMDB {
     }
     ipaso(ip) {
         return this.asnReader?.asn(ip)?.autonomousSystemOrganization;
+    }
+    ipasn(ip) {
+        return this.asnReader?.asn(ip)?.autonomousSystemNumber;
     }
 }

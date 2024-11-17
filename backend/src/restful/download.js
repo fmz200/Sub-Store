@@ -13,6 +13,9 @@ import { getISO } from '@/utils/geo';
 import env from '@/utils/env';
 
 export default function register($app) {
+    $app.get('/share/col/:name', downloadCollection);
+    $app.get('/share/sub/:name', downloadSubscription);
+
     $app.get('/download/collection/:name', downloadCollection);
     $app.get('/download/:name', downloadSubscription);
     $app.get(
@@ -52,6 +55,8 @@ async function downloadSubscription(req, res) {
     name = decodeURIComponent(name);
     nezhaIndex = decodeURIComponent(nezhaIndex);
 
+    const useMihomoExternal = req.query.target === 'SurgeMac';
+
     const platform =
         req.query.target || getPlatformFromHeaders(req.headers) || 'JSON';
 
@@ -69,10 +74,34 @@ async function downloadSubscription(req, res) {
         produceType,
         includeUnsupportedProxy,
         resultFormat,
+        proxy,
+        noCache,
     } = req.query;
+    let $options = {};
+    if (req.query.$options) {
+        try {
+            // 支持 `#${encodeURIComponent(JSON.stringify({arg1: "1"}))}`
+            $options = JSON.parse(decodeURIComponent(req.query.$options));
+        } catch (e) {
+            for (const pair of req.query.$options.split('&')) {
+                const key = pair.split('=')[0];
+                const value = pair.split('=')[1];
+                // 部分兼容之前的逻辑 const value = pair.split('=')[1] || true;
+                $options[key] =
+                    value == null || value === ''
+                        ? true
+                        : decodeURIComponent(value);
+            }
+        }
+        $.info(`传入 $options: ${JSON.stringify($options)}`);
+    }
     if (url) {
         url = decodeURIComponent(url);
         $.info(`指定远程订阅 URL: ${url}`);
+    }
+    if (proxy) {
+        proxy = decodeURIComponent(proxy);
+        $.info(`指定远程订阅使用代理/策略 proxy: ${proxy}`);
     }
     if (ua) {
         ua = decodeURIComponent(ua);
@@ -99,6 +128,14 @@ async function downloadSubscription(req, res) {
         $.info(`包含不支持的节点: ${includeUnsupportedProxy}`);
     }
 
+    if (useMihomoExternal) {
+        $.info(`手动指定了 target 为 SurgeMac, 将使用 Mihomo External`);
+    }
+
+    if (noCache) {
+        $.info(`指定不使用缓存: ${noCache}`);
+    }
+
     const allSubs = $.read(SUBS_KEY);
     const sub = findByName(allSubs, name);
     if (sub) {
@@ -115,7 +152,11 @@ async function downloadSubscription(req, res) {
                 produceType,
                 produceOpts: {
                     'include-unsupported-proxy': includeUnsupportedProxy,
+                    useMihomoExternal,
                 },
+                $options,
+                proxy,
+                noCache,
             });
 
             if (
@@ -123,10 +164,11 @@ async function downloadSubscription(req, res) {
                 ['localFirst', 'remoteFirst'].includes(sub.mergeSources)
             ) {
                 try {
-                    url = `${url || sub.url}`
-                        .split(/[\r\n]+/)
-                        .map((i) => i.trim())
-                        .filter((i) => i.length)?.[0];
+                    url =
+                        `${url || sub.url}`
+                            .split(/[\r\n]+/)
+                            .map((i) => i.trim())
+                            .filter((i) => i.length)?.[0] || '';
 
                     let $arguments = {};
                     const rawArgs = url.split('#');
@@ -152,10 +194,10 @@ async function downloadSubscription(req, res) {
                     if (!$arguments.noFlow) {
                         // forward flow headers
                         const flowInfo = await getFlowHeaders(
-                            url,
+                            $arguments?.insecure ? `${url}#insecure` : url,
                             $arguments.flowUserAgent,
                             undefined,
-                            sub.proxy,
+                            proxy || sub.proxy,
                             $arguments.flowUrl,
                         );
                         if (flowInfo) {
@@ -227,6 +269,8 @@ async function downloadCollection(req, res) {
     name = decodeURIComponent(name);
     nezhaIndex = decodeURIComponent(nezhaIndex);
 
+    const useMihomoExternal = req.query.target === 'SurgeMac';
+
     const platform =
         req.query.target || getPlatformFromHeaders(req.headers) || 'JSON';
 
@@ -244,7 +288,33 @@ async function downloadCollection(req, res) {
         produceType,
         includeUnsupportedProxy,
         resultFormat,
+        proxy,
+        noCache,
     } = req.query;
+
+    let $options = {};
+    if (req.query.$options) {
+        try {
+            // 支持 `#${encodeURIComponent(JSON.stringify({arg1: "1"}))}`
+            $options = JSON.parse(decodeURIComponent(req.query.$options));
+        } catch (e) {
+            for (const pair of req.query.$options.split('&')) {
+                const key = pair.split('=')[0];
+                const value = pair.split('=')[1];
+                // 部分兼容之前的逻辑 const value = pair.split('=')[1] || true;
+                $options[key] =
+                    value == null || value === ''
+                        ? true
+                        : decodeURIComponent(value);
+            }
+        }
+        $.info(`传入 $options: ${JSON.stringify($options)}`);
+    }
+
+    if (proxy) {
+        proxy = decodeURIComponent(proxy);
+        $.info(`指定远程订阅使用代理/策略 proxy: ${proxy}`);
+    }
 
     if (ignoreFailedRemoteSub != null && ignoreFailedRemoteSub !== '') {
         ignoreFailedRemoteSub = decodeURIComponent(ignoreFailedRemoteSub);
@@ -259,6 +329,12 @@ async function downloadCollection(req, res) {
         includeUnsupportedProxy = decodeURIComponent(includeUnsupportedProxy);
         $.info(`包含不支持的节点: ${includeUnsupportedProxy}`);
     }
+    if (useMihomoExternal) {
+        $.info(`手动指定了 target 为 SurgeMac, 将使用 Mihomo External`);
+    }
+    if (noCache) {
+        $.info(`指定不使用缓存: ${noCache}`);
+    }
 
     if (collection) {
         try {
@@ -270,7 +346,11 @@ async function downloadCollection(req, res) {
                 produceType,
                 produceOpts: {
                     'include-unsupported-proxy': includeUnsupportedProxy,
+                    useMihomoExternal,
                 },
+                $options,
+                proxy,
+                noCache,
             });
 
             // forward flow header from the first subscription in this collection
@@ -283,10 +363,11 @@ async function downloadCollection(req, res) {
                     ['localFirst', 'remoteFirst'].includes(sub.mergeSources)
                 ) {
                     try {
-                        let url = `${sub.url}`
-                            .split(/[\r\n]+/)
-                            .map((i) => i.trim())
-                            .filter((i) => i.length)?.[0];
+                        let url =
+                            `${sub.url}`
+                                .split(/[\r\n]+/)
+                                .map((i) => i.trim())
+                                .filter((i) => i.length)?.[0] || '';
 
                         let $arguments = {};
                         const rawArgs = url.split('#');
@@ -311,10 +392,10 @@ async function downloadCollection(req, res) {
                         }
                         if (!$arguments.noFlow) {
                             const flowInfo = await getFlowHeaders(
-                                url,
+                                $arguments?.insecure ? `${url}#insecure` : url,
                                 $arguments.flowUserAgent,
                                 undefined,
-                                sub.proxy,
+                                proxy || sub.proxy || collection.proxy,
                                 $arguments.flowUrl,
                             );
                             if (flowInfo) {

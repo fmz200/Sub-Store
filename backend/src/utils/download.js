@@ -15,12 +15,13 @@ import $ from '@/core/app';
 const tasks = new Map();
 
 export default async function download(
-    rawUrl,
+    rawUrl = '',
     ua,
     timeout,
-    proxy,
+    customProxy,
     skipCustomCache,
     awaitCustomCache,
+    noCache,
 ) {
     let $arguments = {};
     let url = rawUrl.replace(/#noFlow$/, '');
@@ -43,11 +44,20 @@ export default async function download(
         }
     }
     const { isNode, isStash, isLoon, isShadowRocket, isQX } = ENV();
-    const { defaultUserAgent, defaultTimeout, cacheThreshold } =
+    const { defaultProxy, defaultUserAgent, defaultTimeout, cacheThreshold } =
         $.read(SETTINGS_KEY);
+    let proxy = customProxy || defaultProxy;
+    if ($.env.isNode) {
+        proxy = proxy || eval('process.env.SUB_STORE_BACKEND_DEFAULT_PROXY');
+    }
     const userAgent = ua || defaultUserAgent || 'clash.meta';
     const requestTimeout = timeout || defaultTimeout;
     const id = hex_md5(userAgent + url);
+
+    if ($arguments?.cacheKey === true) {
+        $.error(`使用自定义缓存时 cacheKey 的值不能为空`);
+        $arguments.cacheKey = undefined;
+    }
 
     const customCacheKey = $arguments?.cacheKey
         ? `#sub-store-cached-custom-${$arguments?.cacheKey}`
@@ -56,7 +66,7 @@ export default async function download(
     if (customCacheKey && !skipCustomCache) {
         const customCached = $.read(customCacheKey);
         const cached = resourceCache.get(id);
-        if (!$arguments?.noCache && cached) {
+        if (!noCache && !$arguments?.noCache && cached) {
             $.info(
                 `乐观缓存: URL ${url}\n存在有效的常规缓存\n使用常规缓存以避免重复请求`,
             );
@@ -140,16 +150,21 @@ export default async function download(
 
     // try to find in app cache
     const cached = resourceCache.get(id);
-    if (!$arguments?.noCache && cached) {
-        $.info(`使用缓存: ${url}`);
+    if (!noCache && !$arguments?.noCache && cached) {
+        $.info(`使用缓存: ${url}, ${userAgent}`);
         result = cached;
         if (customCacheKey) {
             $.info(`URL ${url}\n写入自定义缓存 ${$arguments?.cacheKey}`);
             $.write(cached, customCacheKey);
         }
     } else {
+        const insecure = $arguments?.insecure
+            ? isNode
+                ? { strictSSL: false }
+                : { insecure: true }
+            : undefined;
         $.info(
-            `Downloading...\nUser-Agent: ${userAgent}\nTimeout: ${requestTimeout}\nProxy: ${proxy}\nURL: ${url}`,
+            `Downloading...\nUser-Agent: ${userAgent}\nTimeout: ${requestTimeout}\nProxy: ${proxy}\nInsecure: ${!!insecure}\nURL: ${url}`,
         );
         try {
             const { body, headers } = await http.get({
@@ -158,12 +173,13 @@ export default async function download(
                 ...(isLoon && proxy ? { node: proxy } : {}),
                 ...(isQX && proxy ? { opts: { policy: proxy } } : {}),
                 ...(proxy ? getPolicyDescriptor(proxy) : {}),
+                ...(insecure ? insecure : {}),
             });
 
             if (headers) {
                 const flowInfo = getFlowField(headers);
                 if (flowInfo) {
-                    headersResourceCache.set(url, flowInfo);
+                    headersResourceCache.set(id, flowInfo);
                 }
             }
             if (body.replace(/\s/g, '').length === 0)

@@ -202,13 +202,8 @@ const tlsParser = (proxy, parsedProxy) => {
         parsedProxy.tls.alpn = [proxy.alpn];
     } else if (Array.isArray(proxy.alpn)) parsedProxy.tls.alpn = proxy.alpn;
     if (proxy.ca) parsedProxy.tls.certificate_path = `${proxy.ca}`;
-    if (proxy.ca_str) parsedProxy.tls.certificate = proxy.ca_sStr;
-    if (proxy['ca-str']) parsedProxy.tls.certificate = proxy['ca-str'];
-    if (proxy['client-fingerprint'] && proxy['client-fingerprint'] !== '')
-        parsedProxy.tls.utls = {
-            enabled: true,
-            fingerprint: proxy['client-fingerprint'],
-        };
+    if (proxy.ca_str) parsedProxy.tls.certificate = [proxy.ca_str];
+    if (proxy['ca-str']) parsedProxy.tls.certificate = [proxy['ca-str']];
     if (proxy['reality-opts']) {
         parsedProxy.tls.reality = { enabled: true };
         if (proxy['reality-opts']['public-key'])
@@ -217,7 +212,13 @@ const tlsParser = (proxy, parsedProxy) => {
         if (proxy['reality-opts']['short-id'])
             parsedProxy.tls.reality.short_id =
                 proxy['reality-opts']['short-id'];
+        parsedProxy.tls.utls = { enabled: true };
     }
+    if (proxy['client-fingerprint'] && proxy['client-fingerprint'] !== '')
+        parsedProxy.tls.utls = {
+            enabled: true,
+            fingerprint: proxy['client-fingerprint'],
+        };
     if (!parsedProxy.tls.enabled) delete parsedProxy.tls;
 };
 

@@ -149,9 +149,13 @@ export default function ClashMeta_Producer() {
                     }
                 }
                 if (
-                    ['trojan', 'tuic', 'hysteria', 'hysteria2'].includes(
-                        proxy.type,
-                    )
+                    [
+                        'trojan',
+                        'tuic',
+                        'hysteria',
+                        'hysteria2',
+                        'juicity',
+                    ].includes(proxy.type)
                 ) {
                     delete proxy.tls;
                 }
@@ -174,9 +178,11 @@ export default function ClashMeta_Producer() {
                 delete proxy.id;
                 delete proxy.resolved;
                 delete proxy['no-resolve'];
-                for (const key in proxy) {
-                    if (proxy[key] == null || /^_/i.test(key)) {
-                        delete proxy[key];
+                if (type !== 'internal') {
+                    for (const key in proxy) {
+                        if (proxy[key] == null || /^_/i.test(key)) {
+                            delete proxy[key];
+                        }
                     }
                 }
                 if (

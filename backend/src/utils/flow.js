@@ -1,17 +1,35 @@
 import { SETTINGS_KEY } from '@/constants';
 import { HTTP, ENV } from '@/vendor/open-api';
+import { hex_md5 } from '@/vendor/md5';
 import { getPolicyDescriptor } from '@/utils';
 import $ from '@/core/app';
 import headersResourceCache from '@/utils/headers-resource-cache';
 
 export function getFlowField(headers) {
-    const subkey = Object.keys(headers).filter((k) =>
-        /SUBSCRIPTION-USERINFO/i.test(k),
-    )[0];
-    return headers[subkey];
+    let subKey = '';
+    let webPageKey = '';
+
+    Object.keys(headers).some((k) => {
+        if (/SUBSCRIPTION-USERINFO/i.test(k)) {
+            subKey = k;
+        } else if (/PROFILE-WEB-PAGE-URL/i.test(k)) {
+            webPageKey = k;
+        }
+        return subKey && webPageKey;
+    });
+
+    return `${headers[subKey] || ''}${
+        webPageKey ? `;app_url=${headers[webPageKey]}` : ''
+    }`;
 }
-export async function getFlowHeaders(rawUrl, ua, timeout, proxy, flowUrl) {
-    let url = flowUrl || rawUrl;
+export async function getFlowHeaders(
+    rawUrl,
+    ua,
+    timeout,
+    customProxy,
+    flowUrl,
+) {
+    let url = flowUrl || rawUrl || '';
     let $arguments = {};
     const rawArgs = url.split('#');
     url = url.split('#')[0];
@@ -35,24 +53,32 @@ export async function getFlowHeaders(rawUrl, ua, timeout, proxy, flowUrl) {
         return;
     }
     const { isStash, isLoon, isShadowRocket, isQX } = ENV();
-    const cached = headersResourceCache.get(url);
+    const insecure = $arguments?.insecure
+        ? $.env.isNode
+            ? { strictSSL: false }
+            : { insecure: true }
+        : undefined;
+    const { defaultProxy, defaultFlowUserAgent, defaultTimeout } =
+        $.read(SETTINGS_KEY);
+    let proxy = customProxy || defaultProxy;
+    if ($.env.isNode) {
+        proxy = proxy || eval('process.env.SUB_STORE_BACKEND_DEFAULT_PROXY');
+    }
+    const userAgent = ua || defaultFlowUserAgent || 'clash';
+    const requestTimeout = timeout || defaultTimeout;
+    const id = hex_md5(userAgent + url);
+    const cached = headersResourceCache.get(id);
     let flowInfo;
     if (!$arguments?.noCache && cached) {
-        // $.info(`使用缓存的流量信息: ${url}`);
+        $.info(`使用缓存的流量信息: ${url}, ${userAgent}`);
         flowInfo = cached;
     } else {
-        const { defaultFlowUserAgent, defaultTimeout } = $.read(SETTINGS_KEY);
-        const userAgent =
-            ua ||
-            defaultFlowUserAgent ||
-            'Quantumult%20X/1.0.30 (iPhone14,2; iOS 15.6)';
-        const requestTimeout = timeout || defaultTimeout;
         const http = HTTP();
         if (flowUrl) {
             $.info(
                 `使用 GET 方法从响应体获取流量信息: ${flowUrl}, User-Agent: ${
                     userAgent || ''
-                }`,
+                }, Insecure: ${!!insecure}, Proxy: ${proxy}`,
             );
             const { body } = await http.get({
                 url: flowUrl,
@@ -60,6 +86,11 @@ export async function getFlowHeaders(rawUrl, ua, timeout, proxy, flowUrl) {
                     'User-Agent': userAgent,
                 },
                 timeout: requestTimeout,
+                ...(proxy ? { proxy } : {}),
+                ...(isLoon && proxy ? { node: proxy } : {}),
+                ...(isQX && proxy ? { opts: { policy: proxy } } : {}),
+                ...(proxy ? getPolicyDescriptor(proxy) : {}),
+                ...(insecure ? insecure : {}),
             });
             flowInfo = body;
         } else {
@@ -67,7 +98,7 @@ export async function getFlowHeaders(rawUrl, ua, timeout, proxy, flowUrl) {
                 $.info(
                     `使用 HEAD 方法从响应头获取流量信息: ${url}, User-Agent: ${
                         userAgent || ''
-                    }`,
+                    }, Insecure: ${!!insecure}, Proxy: ${proxy}`,
                 );
                 const { headers } = await http.head({
                     url: url
@@ -91,20 +122,23 @@ export async function getFlowHeaders(rawUrl, ua, timeout, proxy, flowUrl) {
                     ...(isLoon && proxy ? { node: proxy } : {}),
                     ...(isQX && proxy ? { opts: { policy: proxy } } : {}),
                     ...(proxy ? getPolicyDescriptor(proxy) : {}),
+                    ...(insecure ? insecure : {}),
                 });
                 flowInfo = getFlowField(headers);
             } catch (e) {
                 $.error(
                     `使用 HEAD 方法从响应头获取流量信息失败: ${url}, User-Agent: ${
                         userAgent || ''
-                    }: ${e.message ?? e}`,
+                    }, Insecure: ${!!insecure}, Proxy: ${proxy}: ${
+                        e.message ?? e
+                    }`,
                 );
             }
             if (!flowInfo) {
                 $.info(
                     `使用 GET 方法获取流量信息: ${url}, User-Agent: ${
                         userAgent || ''
-                    }`,
+                    }, Insecure: ${!!insecure}, Proxy: ${proxy}`,
                 );
                 const { headers } = await http.get({
                     url: url
@@ -113,14 +147,28 @@ export async function getFlowHeaders(rawUrl, ua, timeout, proxy, flowUrl) {
                         .filter((i) => i.length)[0],
                     headers: {
                         'User-Agent': userAgent,
+                        ...(isStash && proxy
+                            ? {
+                                  'X-Stash-Selected-Proxy':
+                                      encodeURIComponent(proxy),
+                              }
+                            : {}),
+                        ...(isShadowRocket && proxy
+                            ? { 'X-Surge-Policy': proxy }
+                            : {}),
                     },
                     timeout: requestTimeout,
+                    ...(proxy ? { proxy } : {}),
+                    ...(isLoon && proxy ? { node: proxy } : {}),
+                    ...(isQX && proxy ? { opts: { policy: proxy } } : {}),
+                    ...(proxy ? getPolicyDescriptor(proxy) : {}),
+                    ...(insecure ? insecure : {}),
                 });
                 flowInfo = getFlowField(headers);
             }
         }
         if (flowInfo) {
-            headersResourceCache.set(url, flowInfo);
+            headersResourceCache.set(id, flowInfo);
         }
     }
 
@@ -151,8 +199,29 @@ export function parseFlowHeaders(flowHeaders) {
         ? Number(expireMatch[1] + expireMatch[2])
         : undefined;
 
-    return { expires, total, usage: { upload, download } };
+    const remainingDaysMatch = flowHeaders.match(/reset_day=([0-9]+)/);
+    const remainingDays = remainingDaysMatch
+        ? Number(remainingDaysMatch[1])
+        : undefined;
+
+    const appUrlMatch = flowHeaders.match(/app_url=(.*?)\s*?(;|$)/);
+    const appUrl = appUrlMatch ? appUrlMatch[1] : undefined;
+
+    const planNameMatch = flowHeaders.match(/plan_name=(.*?)\s*?(;|$)/);
+    const planName = planNameMatch
+        ? decodeURIComponent(planNameMatch[1])
+        : undefined;
+
+    return {
+        expires,
+        total,
+        usage: { upload, download },
+        remainingDays,
+        appUrl,
+        planName,
+    };
 }
+
 export function flowTransfer(flow, unit = 'B') {
     const unitList = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
     let unitIndex = unitList.indexOf(unit);

@@ -16,7 +16,11 @@ export default function URI_Producer() {
                 delete proxy[key];
             }
         }
-        if (['trojan', 'tuic', 'hysteria', 'hysteria2'].includes(proxy.type)) {
+        if (
+            ['trojan', 'tuic', 'hysteria', 'hysteria2', 'juicity'].includes(
+                proxy.type,
+            )
+        ) {
             delete proxy.tls;
         }
         if (proxy.server && isIPv6(proxy.server)) {
@@ -219,6 +223,18 @@ export default function URI_Producer() {
                     vlessTransport += `&serviceName=${encodeURIComponent(
                         vlessTransportServiceName,
                     )}`;
+                }
+                if (proxy.network === 'kcp') {
+                    if (proxy.seed) {
+                        vlessTransport += `&seed=${encodeURIComponent(
+                            proxy.seed,
+                        )}`;
+                    }
+                    if (proxy.headerType) {
+                        vlessTransport += `&headerType=${encodeURIComponent(
+                            proxy.headerType,
+                        )}`;
+                    }
                 }
 
                 result = `vless://${proxy.uuid}@${proxy.server}:${

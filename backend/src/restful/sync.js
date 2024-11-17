@@ -37,6 +37,9 @@ async function produceArtifact({
     produceOpts = {},
     subscription,
     awaitCustomCache,
+    $options,
+    proxy,
+    noCache,
 }) {
     platform = platform || 'JSON';
 
@@ -67,9 +70,10 @@ async function produceArtifact({
                                 url,
                                 ua || sub.ua,
                                 undefined,
-                                sub.proxy,
+                                proxy || sub.proxy,
                                 undefined,
                                 awaitCustomCache,
+                                noCache,
                             );
                         } catch (err) {
                             errors[url] = err;
@@ -114,9 +118,10 @@ async function produceArtifact({
                                 url,
                                 ua || sub.ua,
                                 undefined,
-                                sub.proxy,
+                                proxy || sub.proxy,
                                 undefined,
                                 awaitCustomCache,
+                                noCache,
                             );
                         } catch (err) {
                             errors[url] = err;
@@ -150,7 +155,8 @@ async function produceArtifact({
             .flat();
 
         proxies.forEach((proxy) => {
-            proxy.subName = sub.name;
+            proxy._subName = sub.name;
+            proxy._subDisplayName = sub.displayName;
         });
         // apply processors
         proxies = await ProxyUtils.process(
@@ -158,6 +164,7 @@ async function produceArtifact({
             sub.process || [],
             platform,
             { [sub.name]: sub },
+            $options,
         );
         if (proxies.length === 0) {
             throw new Error(`订阅 ${name} 中不含有效节点`);
@@ -186,7 +193,20 @@ async function produceArtifact({
         const allCols = $.read(COLLECTIONS_KEY);
         const collection = findByName(allCols, name);
         if (!collection) throw new Error(`找不到组合订阅 ${name}`);
-        const subnames = collection.subscriptions;
+        const subnames = [...collection.subscriptions];
+        let subscriptionTags = collection.subscriptionTags;
+        if (Array.isArray(subscriptionTags) && subscriptionTags.length > 0) {
+            allSubs.forEach((sub) => {
+                if (
+                    Array.isArray(sub.tag) &&
+                    sub.tag.length > 0 &&
+                    !subnames.includes(sub.name) &&
+                    sub.tag.some((tag) => subscriptionTags.includes(tag))
+                ) {
+                    subnames.push(sub.name);
+                }
+            });
+        }
         const results = {};
         const errors = {};
         let processed = 0;
@@ -217,7 +237,12 @@ async function produceArtifact({
                                             url,
                                             sub.ua,
                                             undefined,
-                                            sub.proxy,
+                                            proxy ||
+                                                sub.proxy ||
+                                                collection.proxy,
+                                            undefined,
+                                            undefined,
+                                            noCache,
                                         );
                                     } catch (err) {
                                         errors[url] = err;
@@ -250,8 +275,10 @@ async function produceArtifact({
                         .flat();
 
                     currentProxies.forEach((proxy) => {
-                        proxy.subName = sub.name;
-                        proxy.collectionName = collection.name;
+                        proxy._subName = sub.name;
+                        proxy._subDisplayName = sub.displayName;
+                        proxy._collectionName = collection.name;
+                        proxy._collectionDisplayName = collection.displayName;
                     });
 
                     // apply processors
@@ -259,7 +286,11 @@ async function produceArtifact({
                         currentProxies,
                         sub.process || [],
                         platform,
-                        { [sub.name]: sub, _collection: collection },
+                        {
+                            [sub.name]: sub,
+                            _collection: collection,
+                            $options,
+                        },
                     );
                     results[name] = currentProxies;
                     processed++;
@@ -303,7 +334,8 @@ async function produceArtifact({
         );
 
         proxies.forEach((proxy) => {
-            proxy.collectionName = collection.name;
+            proxy._collectionName = collection.name;
+            proxy._collectionDisplayName = collection.displayName;
         });
 
         // apply own processors
@@ -312,6 +344,7 @@ async function produceArtifact({
             collection.process || [],
             platform,
             { _collection: collection },
+            $options,
         );
         if (proxies.length === 0) {
             throw new Error(`组合订阅 ${name} 中不含有效节点`);
@@ -378,7 +411,15 @@ async function produceArtifact({
                     .filter((i) => i.length)
                     .map(async (url) => {
                         try {
-                            return await download(url, ua || file.ua);
+                            return await download(
+                                url,
+                                ua || file.ua,
+                                undefined,
+                                file.proxy || proxy,
+                                undefined,
+                                undefined,
+                                noCache,
+                            );
                         } catch (err) {
                             errors[url] = err;
                             $.error(
@@ -421,7 +462,15 @@ async function produceArtifact({
                     .filter((i) => i.length)
                     .map(async (url) => {
                         try {
-                            return await download(url, ua || file.ua);
+                            return await download(
+                                url,
+                                ua || file.ua,
+                                undefined,
+                                file.proxy || proxy,
+                                undefined,
+                                undefined,
+                                noCache,
+                            );
                         } catch (err) {
                             errors[url] = err;
                             $.error(
@@ -460,10 +509,10 @@ async function produceArtifact({
         const processed =
             Array.isArray(file.process) && file.process.length > 0
                 ? await ProxyUtils.process(
-                      { $files: files, $content: filesContent },
+                      { $files: files, $content: filesContent, $options },
                       file.process,
                   )
-                : { $content: filesContent, $files: files };
+                : { $content: filesContent, $files: files, $options };
 
         return processed?.$content ?? '';
     }
@@ -522,6 +571,16 @@ async function syncArtifacts() {
                 try {
                     if (artifact.sync && artifact.source) {
                         $.info(`正在同步云配置：${artifact.name}...`);
+
+                        const useMihomoExternal =
+                            artifact.platform === 'SurgeMac';
+
+                        if (useMihomoExternal) {
+                            $.info(
+                                `手动指定了 target 为 SurgeMac, 将使用 Mihomo External`,
+                            );
+                        }
+
                         const output = await produceArtifact({
                             type: artifact.type,
                             name: artifact.source,
@@ -529,6 +588,7 @@ async function syncArtifacts() {
                             produceOpts: {
                                 'include-unsupported-proxy':
                                     artifact.includeUnsupportedProxy,
+                                useMihomoExternal,
                             },
                         });
 
@@ -644,12 +704,18 @@ async function syncArtifact(req, res) {
     }
 
     try {
+        const useMihomoExternal = artifact.platform === 'SurgeMac';
+
+        if (useMihomoExternal) {
+            $.info(`手动指定了 target 为 SurgeMac, 将使用 Mihomo External`);
+        }
         const output = await produceArtifact({
             type: artifact.type,
             name: artifact.source,
             platform: artifact.platform,
             produceOpts: {
                 'include-unsupported-proxy': artifact.includeUnsupportedProxy,
+                useMihomoExternal,
             },
         });
 

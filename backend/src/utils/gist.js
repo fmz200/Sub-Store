@@ -1,10 +1,21 @@
-import { HTTP } from '@/vendor/open-api';
+import { HTTP, ENV } from '@/vendor/open-api';
+import { getPolicyDescriptor } from '@/utils';
+import $ from '@/core/app';
+import { SETTINGS_KEY } from '@/constants';
 
 /**
  * Gist backup
  */
 export default class Gist {
     constructor({ token, key, syncPlatform }) {
+        const { isStash, isLoon, isShadowRocket, isQX } = ENV();
+        const { defaultProxy, defaultTimeout: timeout } = $.read(SETTINGS_KEY);
+        let proxy = defaultProxy;
+        if ($.env.isNode) {
+            proxy =
+                proxy || eval('process.env.SUB_STORE_BACKEND_DEFAULT_PROXY');
+        }
+
         if (syncPlatform === 'gitlab') {
             this.headers = {
                 'PRIVATE-TOKEN': `${token}`,
@@ -13,7 +24,25 @@ export default class Gist {
             };
             this.http = HTTP({
                 baseURL: 'https://gitlab.com/api/v4',
-                headers: { ...this.headers },
+                headers: {
+                    ...this.headers,
+                    ...(isStash && proxy
+                        ? {
+                              'X-Stash-Selected-Proxy':
+                                  encodeURIComponent(proxy),
+                          }
+                        : {}),
+                    ...(isShadowRocket && proxy
+                        ? { 'X-Surge-Policy': proxy }
+                        : {}),
+                },
+
+                ...(proxy ? { proxy } : {}),
+                ...(isLoon && proxy ? { node: proxy } : {}),
+                ...(isQX && proxy ? { opts: { policy: proxy } } : {}),
+                ...(proxy ? getPolicyDescriptor(proxy) : {}),
+                timeout,
+
                 events: {
                     onResponse: (resp) => {
                         if (/^[45]/.test(String(resp.statusCode))) {
@@ -35,7 +64,25 @@ export default class Gist {
             };
             this.http = HTTP({
                 baseURL: 'https://api.github.com',
-                headers: { ...this.headers },
+                headers: {
+                    ...this.headers,
+                    ...(isStash && proxy
+                        ? {
+                              'X-Stash-Selected-Proxy':
+                                  encodeURIComponent(proxy),
+                          }
+                        : {}),
+                    ...(isShadowRocket && proxy
+                        ? { 'X-Surge-Policy': proxy }
+                        : {}),
+                },
+
+                ...(proxy ? { proxy } : {}),
+                ...(isLoon && proxy ? { node: proxy } : {}),
+                ...(isQX && proxy ? { opts: { policy: proxy } } : {}),
+                ...(proxy ? getPolicyDescriptor(proxy) : {}),
+                timeout,
+
                 events: {
                     onResponse: (resp) => {
                         if (/^[45]/.test(String(resp.statusCode))) {

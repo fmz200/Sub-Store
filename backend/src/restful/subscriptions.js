@@ -34,6 +34,11 @@ export default function register($app) {
 async function getFlowInfo(req, res) {
     let { name } = req.params;
     name = decodeURIComponent(name);
+    let { url } = req.query;
+    if (url) {
+        url = decodeURIComponent(url);
+        $.info(`指定远程订阅 URL: ${url}`);
+    }
     const allSubs = $.read(SUBS_KEY);
     const sub = findByName(allSubs, name);
     if (!sub) {
@@ -52,9 +57,25 @@ async function getFlowInfo(req, res) {
         !['localFirst', 'remoteFirst'].includes(sub.mergeSources)
     ) {
         if (sub.subUserinfo) {
-            success(res, {
-                ...parseFlowHeaders(sub.subUserinfo),
-            });
+            try {
+                success(res, {
+                    ...parseFlowHeaders(sub.subUserinfo),
+                });
+            } catch (e) {
+                $.error(
+                    `Failed to parse flow info for local subscription ${name}: ${
+                        e.message ?? e
+                    }`,
+                );
+                failed(
+                    res,
+                    new RequestInvalidError(
+                        'NO_FLOW_INFO',
+                        'N/A',
+                        `Failed to parse flow info`,
+                    ),
+                );
+            }
         } else {
             failed(
                 res,
@@ -68,10 +89,11 @@ async function getFlowInfo(req, res) {
         return;
     }
     try {
-        let url = `${sub.url}`
-            .split(/[\r\n]+/)
-            .map((i) => i.trim())
-            .filter((i) => i.length)?.[0];
+        url =
+            `${url || sub.url}`
+                .split(/[\r\n]+/)
+                .map((i) => i.trim())
+                .filter((i) => i.length)?.[0] || '';
 
         let $arguments = {};
         const rawArgs = url.split('#');
@@ -104,17 +126,37 @@ async function getFlowInfo(req, res) {
             return;
         }
         if (sub.subUserinfo) {
-            success(res, {
-                ...parseFlowHeaders(sub.subUserinfo),
-                remainingDays: getRmainingDays({
+            try {
+                const remainingDays = getRmainingDays({
                     resetDay: $arguments.resetDay,
                     startDate: $arguments.startDate,
                     cycleDays: $arguments.cycleDays,
-                }),
-            });
+                });
+                const result = {
+                    ...parseFlowHeaders(sub.subUserinfo),
+                };
+                if (remainingDays != null) {
+                    result.remainingDays = remainingDays;
+                }
+                success(res, result);
+            } catch (e) {
+                $.error(
+                    `Failed to parse flow info for local subscription ${name}: ${
+                        e.message ?? e
+                    }`,
+                );
+                failed(
+                    res,
+                    new RequestInvalidError(
+                        'NO_FLOW_INFO',
+                        'N/A',
+                        `Failed to parse flow info`,
+                    ),
+                );
+            }
         } else {
             const flowHeaders = await getFlowHeaders(
-                url,
+                $arguments?.insecure ? `${url}#insecure` : url,
                 $arguments.flowUserAgent,
                 undefined,
                 sub.proxy,
@@ -131,14 +173,18 @@ async function getFlowInfo(req, res) {
                 );
                 return;
             }
-            success(res, {
-                ...parseFlowHeaders(flowHeaders),
-                remainingDays: getRmainingDays({
-                    resetDay: $arguments.resetDay,
-                    startDate: $arguments.startDate,
-                    cycleDays: $arguments.cycleDays,
-                }),
+            const remainingDays = getRmainingDays({
+                resetDay: $arguments.resetDay,
+                startDate: $arguments.startDate,
+                cycleDays: $arguments.cycleDays,
             });
+            const result = {
+                ...parseFlowHeaders(flowHeaders),
+            };
+            if (remainingDays != null) {
+                result.remainingDays = remainingDays;
+            }
+            success(res, result);
         }
     } catch (err) {
         failed(

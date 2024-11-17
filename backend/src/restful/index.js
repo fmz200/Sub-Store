@@ -3,11 +3,14 @@ import $ from '@/core/app';
 import migrate from '@/utils/migration';
 import download from '@/utils/download';
 import { syncArtifacts } from '@/restful/sync';
+import { gistBackupAction } from '@/restful/miscs';
+import { TOKENS_KEY } from '@/constants';
 
 import registerSubscriptionRoutes from './subscriptions';
 import registerCollectionRoutes from './collections';
 import registerArtifactRoutes from './artifacts';
 import registerFileRoutes from './file';
+import registerTokenRoutes from './token';
 import registerModuleRoutes from './module';
 import registerSyncRoutes from './sync';
 import registerDownloadRoutes from './download';
@@ -35,6 +38,7 @@ export default function serve() {
     registerSettingRoutes($app);
     registerArtifactRoutes($app);
     registerFileRoutes($app);
+    registerTokenRoutes($app);
     registerModuleRoutes($app);
     registerSyncRoutes($app);
     registerNodeInfoRoutes($app);
@@ -44,20 +48,81 @@ export default function serve() {
     $app.start();
 
     if ($.env.isNode) {
-        const backend_cron = eval('process.env.SUB_STORE_BACKEND_CRON');
-        if (backend_cron) {
-            $.info(`[CRON] ${backend_cron} enabled`);
+        // Deprecated: SUB_STORE_BACKEND_CRON
+        const backend_sync_cron =
+            eval('process.env.SUB_STORE_BACKEND_SYNC_CRON') ||
+            eval('process.env.SUB_STORE_BACKEND_CRON');
+        if (backend_sync_cron) {
+            $.info(`[SYNC CRON] ${backend_sync_cron} enabled`);
             const { CronJob } = eval(`require("cron")`);
             new CronJob(
-                backend_cron,
+                backend_sync_cron,
                 async function () {
                     try {
-                        $.info(`[CRON] ${backend_cron} started`);
+                        $.info(`[SYNC CRON] ${backend_sync_cron} started`);
                         await syncArtifacts();
-                        $.info(`[CRON] ${backend_cron} finished`);
+                        $.info(`[SYNC CRON] ${backend_sync_cron} finished`);
                     } catch (e) {
                         $.error(
-                            `[CRON] ${backend_cron} error: ${e.message ?? e}`,
+                            `[SYNC CRON] ${backend_sync_cron} error: ${
+                                e.message ?? e
+                            }`,
+                        );
+                    }
+                }, // onTick
+                null, // onComplete
+                true, // start
+                // 'Asia/Shanghai' // timeZone
+            );
+        }
+        const backend_download_cron = eval(
+            'process.env.SUB_STORE_BACKEND_DOWNLOAD_CRON',
+        );
+        if (backend_download_cron) {
+            $.info(`[DOWNLOAD CRON] ${backend_download_cron} enabled`);
+            const { CronJob } = eval(`require("cron")`);
+            new CronJob(
+                backend_download_cron,
+                async function () {
+                    try {
+                        $.info(
+                            `[DOWNLOAD CRON] ${backend_download_cron} started`,
+                        );
+                        await gistBackupAction('download');
+                        $.info(
+                            `[DOWNLOAD CRON] ${backend_download_cron} finished`,
+                        );
+                    } catch (e) {
+                        $.error(
+                            `[DOWNLOAD CRON] ${backend_download_cron} error: ${
+                                e.message ?? e
+                            }`,
+                        );
+                    }
+                }, // onTick
+                null, // onComplete
+                true, // start
+                // 'Asia/Shanghai' // timeZone
+            );
+        }
+        const backend_upload_cron = eval(
+            'process.env.SUB_STORE_BACKEND_UPLOAD_CRON',
+        );
+        if (backend_upload_cron) {
+            $.info(`[UPLOAD CRON] ${backend_upload_cron} enabled`);
+            const { CronJob } = eval(`require("cron")`);
+            new CronJob(
+                backend_upload_cron,
+                async function () {
+                    try {
+                        $.info(`[UPLOAD CRON] ${backend_upload_cron} started`);
+                        await gistBackupAction('upload');
+                        $.info(`[UPLOAD CRON] ${backend_upload_cron} finished`);
+                    } catch (e) {
+                        $.error(
+                            `[UPLOAD CRON] ${backend_upload_cron} error: ${
+                                e.message ?? e
+                            }`,
                         );
                     }
                 }, // onTick
@@ -81,7 +146,7 @@ export default function serve() {
             try {
                 fs.accessSync(path.join(fe_abs_path, 'index.html'));
             } catch (e) {
-                throw new Error(
+                $.error(
                     `[FRONTEND] index.html file not found in ${fe_abs_path}`,
                 );
             }
@@ -96,6 +161,7 @@ export default function serve() {
 
             const staticFileMiddleware = express_.static(fe_path);
 
+            let be_share_rewrite = '/share/:type/:name';
             let be_api_rewrite = '';
             let be_download_rewrite = '';
             let be_api = '/api/';
@@ -112,15 +178,39 @@ export default function serve() {
                 be_download_rewrite = `${
                     fe_be_path === '/' ? '' : fe_be_path
                 }${be_download}`;
+
+                app.use(
+                    be_share_rewrite,
+                    createProxyMiddleware({
+                        target: `http://127.0.0.1:${port}`,
+                        changeOrigin: true,
+                        pathRewrite: (path, req) => {
+                            if (req.method.toLowerCase() !== 'get')
+                                throw new Error('Method not allowed');
+                            const tokens = $.read(TOKENS_KEY) || [];
+                            const token = tokens.find(
+                                (t) =>
+                                    t.token === req.query.token &&
+                                    t.type === req.params.type &&
+                                    t.name === req.params.name &&
+                                    (t.exp == null || t.exp > Date.now()),
+                            );
+                            if (!token) throw new Error('Forbbiden');
+                            return path;
+                        },
+                    }),
+                );
                 app.use(
                     be_api_rewrite,
                     createProxyMiddleware({
                         target: `http://127.0.0.1:${port}`,
-                        changeOrigin: true,
                         pathRewrite: (path) => {
-                            return path.startsWith(be_api_rewrite)
+                            const newPath = path.startsWith(be_api_rewrite)
                                 ? path.replace(be_api_rewrite, be_api)
                                 : path;
+                            return newPath.includes('?')
+                                ? `${newPath}&share=true`
+                                : `${newPath}?share=true`;
                         },
                     }),
                 );
@@ -157,6 +247,9 @@ export default function serve() {
                     );
                     $.info(
                         `[FRONTEND -> BACKEND] ${fe_address}:${fe_port}${be_download_rewrite} -> http://127.0.0.1:${port}${be_download}`,
+                    );
+                    $.info(
+                        `[SHARE BACKEND] ${fe_address}:${fe_port}${be_share_rewrite}`,
                     );
                 }
             });

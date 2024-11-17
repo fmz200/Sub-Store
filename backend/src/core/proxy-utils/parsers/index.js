@@ -5,6 +5,7 @@ import {
     isPresent,
     isNotBlank,
     getIfPresent,
+    getRandomPort,
 } from '@/utils';
 import getSurgeParser from './peggy/surge';
 import getLoonParser from './peggy/loon';
@@ -12,6 +13,19 @@ import getQXParser from './peggy/qx';
 import getTrojanURIParser from './peggy/trojan-uri';
 
 import { Base64 } from 'js-base64';
+
+function surge_port_hopping(raw) {
+    const [parts, port_hopping] =
+        raw.match(
+            /,\s*?port-hopping\s*?=\s*?["']?\s*?((\d+(-\d+)?)([,;]\d+(-\d+)?)*)\s*?["']?\s*?/,
+        ) || [];
+    return {
+        port_hopping: port_hopping
+            ? port_hopping.replace(/;/g, ',')
+            : undefined,
+        line: parts ? raw.replace(parts, '') : raw,
+    };
+}
 
 // Parse SS URI format (only supports new SIP002, legacy format is depreciated).
 // reference: https://github.com/shadowsocks/shadowsocks-org/wiki/SIP002-URI-Scheme
@@ -158,7 +172,7 @@ function URI_SSR() {
             for (const item of line) {
                 let [key, val] = item.split('=');
                 val = val.trim();
-                if (val.length > 0) {
+                if (val.length > 0 && val !== '(null)') {
                     other_params[key] = val;
                 }
             }
@@ -296,8 +310,13 @@ function URI_VMess() {
                     ? !params.verify_cert
                     : undefined,
             };
+            if (!proxy['skip-cert-verify'] && isPresent(params.allowInsecure)) {
+                proxy['skip-cert-verify'] = /(TRUE)|1/i.test(
+                    params.allowInsecure,
+                );
+            }
             // https://github.com/2dust/v2rayN/wiki/%E5%88%86%E4%BA%AB%E9%93%BE%E6%8E%A5%E6%A0%BC%E5%BC%8F%E8%AF%B4%E6%98%8E(ver-2)
-            if (proxy.tls && proxy.sni) {
+            if (proxy.tls && params.sni && params.sni !== '') {
                 proxy.sni = params.sni;
             }
             let httpupgrade = false;
@@ -305,8 +324,9 @@ function URI_VMess() {
             if (params.net === 'ws' || params.obfs === 'websocket') {
                 proxy.network = 'ws';
             } else if (
-                ['tcp', 'http'].includes(params.net) ||
-                params.obfs === 'http'
+                ['http'].includes(params.net) ||
+                ['http'].includes(params.obfs) ||
+                ['http'].includes(params.type)
             ) {
                 proxy.network = 'http';
             } else if (['grpc'].includes(params.net)) {
@@ -317,6 +337,8 @@ function URI_VMess() {
             ) {
                 proxy.network = 'ws';
                 httpupgrade = true;
+            } else if (params.net === 'h2' || proxy.network === 'h2') {
+                proxy.network = 'h2';
             }
             if (proxy.network) {
                 let transportHost = params.host ?? params.obfsParam;
@@ -332,6 +354,10 @@ function URI_VMess() {
 
                 if (proxy.network === 'http') {
                     if (transportHost) {
+                        // 1)http(tcp)->host中间逗号(,)隔开
+                        transportHost = transportHost
+                            .split(',')
+                            .map((i) => i.trim());
                         transportHost = Array.isArray(transportHost)
                             ? transportHost[0]
                             : transportHost;
@@ -344,6 +370,7 @@ function URI_VMess() {
                         transportPath = '/';
                     }
                 }
+                // 传输层应该有配置, 暂时不考虑兼容不给配置的节点
                 if (transportPath || transportHost) {
                     if (['grpc'].includes(proxy.network)) {
                         proxy[`${proxy.network}-opts`] = {
@@ -363,12 +390,6 @@ function URI_VMess() {
                     }
                 } else {
                     delete proxy.network;
-                }
-
-                // https://github.com/MetaCubeX/Clash.Meta/blob/Alpha/docs/config.yaml#L413
-                // sni 优先级应高于 host
-                if (proxy.tls && !proxy.sni && transportHost) {
-                    proxy.sni = transportHost;
                 }
             }
             return proxy;
@@ -510,14 +531,13 @@ function URI_VLESS() {
             if (Object.keys(opts).length > 0) {
                 proxy[`${proxy.network}-opts`] = opts;
             }
-        }
-
-        if (proxy.tls && !proxy.sni) {
-            if (proxy.network === 'ws') {
-                proxy.sni = proxy['ws-opts']?.headers?.Host;
-            } else if (proxy.network === 'http') {
-                let httpHost = proxy['http-opts']?.headers?.Host;
-                proxy.sni = Array.isArray(httpHost) ? httpHost[0] : httpHost;
+            if (proxy.network === 'kcp') {
+                // mKCP 种子。省略时不使用种子，但不可以为空字符串。建议 mKCP 用户使用 seed。
+                if (params.seed) {
+                    proxy.seed = params.seed;
+                }
+                // mKCP 的伪装头部类型。当前可选值有 none / srtp / utp / wechat-video / dtls / wireguard。省略时默认值为 none，即不使用伪装头部，但不可以为空字符串。
+                proxy.headerType = params.headerType || 'none';
             }
         }
 
@@ -532,13 +552,42 @@ function URI_Hysteria2() {
     };
     const parse = (line) => {
         line = line.split(/(hysteria2|hy2):\/\//)[2];
-        // eslint-disable-next-line no-unused-vars
-        let [__, password, server, ___, port, ____, addons = '', name] =
-            /^(.*?)@(.*?)(:(\d+))?\/?(\?(.*?))?(?:#(.*?))?$/.exec(line);
-        port = parseInt(`${port}`, 10);
-        if (isNaN(port)) {
+        // 端口跳跃有两种写法:
+        // 1. 服务器的地址和可选端口。如果省略端口，则默认为 443。
+        // 端口部分支持 端口跳跃 的「多端口地址格式」。
+        // https://hysteria.network/zh/docs/advanced/Port-Hopping
+        // 2. 参数 mport
+        let ports;
+        /* eslint-disable no-unused-vars */
+        let [
+            __,
+            password,
+            server,
+            ___,
+            port,
+            ____,
+            _____,
+            ______,
+            _______,
+            ________,
+            addons = '',
+            name,
+        ] = /^(.*?)@(.*?)(:((\d+(-\d+)?)([,;]\d+(-\d+)?)*))?\/?(\?(.*?))?(?:#(.*?))?$/.exec(
+            line,
+        );
+        /* eslint-enable no-unused-vars */
+        if (/^\d+$/.test(port)) {
+            port = parseInt(`${port}`, 10);
+            if (isNaN(port)) {
+                port = 443;
+            }
+        } else if (port) {
+            ports = port;
+            port = getRandomPort(ports);
+        } else {
             port = 443;
         }
+
         password = decodeURIComponent(password);
         if (name != null) {
             name = decodeURIComponent(name);
@@ -550,6 +599,7 @@ function URI_Hysteria2() {
             name,
             server,
             port,
+            ports,
             password,
         };
 
@@ -841,18 +891,7 @@ function Clash_All() {
         if (['vmess', 'vless'].includes(proxy.type)) {
             proxy.sni = proxy.servername;
             delete proxy.servername;
-            if (proxy.tls && !proxy.sni) {
-                if (proxy.network === 'ws') {
-                    proxy.sni = proxy['ws-opts']?.headers?.Host;
-                } else if (proxy.network === 'http') {
-                    let httpHost = proxy['http-opts']?.headers?.Host;
-                    proxy.sni = Array.isArray(httpHost)
-                        ? httpHost[0]
-                        : httpHost;
-                }
-            }
         }
-
         if (proxy['server-cert-fingerprint']) {
             proxy['tls-fingerprint'] = proxy['server-cert-fingerprint'];
         }
@@ -1282,7 +1321,12 @@ function Surge_Tuic() {
     const test = (line) => {
         return /^.*=\s*tuic(-v5)?/.test(line.split(',')[0]);
     };
-    const parse = (line) => getSurgeParser().parse(line);
+    const parse = (raw) => {
+        const { port_hopping, line } = surge_port_hopping(raw);
+        const proxy = getSurgeParser().parse(line);
+        proxy['ports'] = port_hopping;
+        return proxy;
+    };
     return { name, test, parse };
 }
 function Surge_WireGuard() {
@@ -1299,7 +1343,12 @@ function Surge_Hysteria2() {
     const test = (line) => {
         return /^.*=\s*hysteria2/.test(line.split(',')[0]);
     };
-    const parse = (line) => getSurgeParser().parse(line);
+    const parse = (raw) => {
+        const { port_hopping, line } = surge_port_hopping(raw);
+        const proxy = getSurgeParser().parse(line);
+        proxy['ports'] = port_hopping;
+        return proxy;
+    };
     return { name, test, parse };
 }
 
